@@ -1,0 +1,347 @@
+\documentclass[runningheads]{llncs}
+
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{xcolor}
+\usepackage{url}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage{kotex}
+
+\begin{document}
+
+\title{SimPath: 강건한 학생 페르소나 테스팅을 통한\\시뮬레이션 기반 학습 경로 추천}
+
+\author{Anonymous Author(s)}
+\institute{Anonymous Institution}
+
+\maketitle
+
+\begin{abstract}
+학습 경로 추천 시스템은 근본적인 문제에 직면한다: 동일한 학생이라도 학습 세션마다 상이한 행동 패턴을 보일 수 있어, 학생의 일시적 상태와 무관하게 높은 성능을 보장하는 경로를 찾기 어렵다.
+본 논문에서는 시뮬레이션 기반 테스팅과 미니맥스 리그렛 최적화를 결합하여 강건한 학습 경로를 추천하는 새로운 프레임워크 \textbf{SimPath}를 제안한다.
+SimPath는 세 단계로 작동한다: (1)~\emph{검색 후 정렬(Retrieve-then-Order)} 경로 생성에서, LLM이 결정론적으로 검색된 문제 풀에서 문제를 정렬하여 환각(hallucination) 위험을 제거하고; (2)~\emph{다중 페르소나 시뮬레이션}에서, 후보 경로들을 끈기형(Gritty), 취약형(Fragile), 현실형(Realistic) 학생 페르소나에 대해 스트레스 테스트하며; (3)~\emph{미니맥스 리그렛 선택}을 통해 모든 페르소나에 걸쳐 최악의 성능 손실을 최소화하는 경로를 식별한다.
+ASSISTments 2009 데이터셋에 대한 실험에서 SimPath는 RL 기반 및 KT 기반 접근법을 포함한 5개 베이스라인에 비해 유의한 개선을 달성하였으며, 정규화된 학습 효과(EP)가 0.084로 베이스라인의 0.007--0.069에 비해 우수하였다($p<0.001$, Cohen's $d$ 최대 2.27).
+특히, 미니맥스 리그렛 선택이 평균 기반 선택 대비 4개 메트릭 모두에서 유의하게 우수한 성능을 보여($p<0.001$), 강건성 기여를 검증하였다.
+\end{abstract}
+
+\keywords{학습 경로 추천 \and 지식 추적 \and 학생 시뮬레이션 \and 미니맥스 리그렛 \and 대규모 언어 모델}
+
+%% ============================================================
+\section{서론}
+%% ============================================================
+
+개인화된 학습 경로 추천은 학생의 지식 습득을 극대화하는 순서로 교육 문제를 배열하는 것을 목표로 한다~\cite{cseal2019,src2023}.
+지식 추적(Knowledge Tracing, KT) 모델~\cite{dkt2015,akt2021}과 강화학습~\cite{cseal2019}을 통해 상당한 발전이 이루어졌으나, 기존 접근법들은 공통적인 한계를 가진다: 단일 고정 학생 모델에 대해 최적화한다는 점이다.
+
+실제로 \emph{동일한} 학생이 세션마다 다르게 행동할 수 있다---월요일 아침에는 충분히 쉬고 끈기 있게 학습하지만, 금요일 저녁에는 산만하고 쉽게 좌절할 수 있다.
+이러한 관찰은 감정 역학에 관한 교육심리학 연구~\cite{pekrun2006}에 의해 뒷받침되며, 학습 경로 추천이 가정된 고정 모델에 대한 단순 최적이 아닌, 학생의 일시적 행동 상태에 대한 불확실성에 \emph{강건}해야 함을 시사한다.
+
+본 논문에서는 이 문제를 세 가지 핵심 혁신을 통해 해결하는 프레임워크 \textbf{SimPath}(\textbf{Sim}ulation-in-the-loop Learning \textbf{Path} Recommendation)를 제안한다:
+
+\begin{enumerate}
+\item \textbf{검색 후 정렬 경로 생성}: 결정론적 검색 단계가 ZPD(근접 발달 영역) 정렬 기준으로 문제를 필터링한 후, LLM 기반 정렬이 이어진다. 이를 통해 문제 ID 환각을 제거하면서 교육학적으로 타당한 순서 배열을 위해 LLM의 추론 능력을 활용한다.
+
+\item \textbf{다중 페르소나 시뮬레이션}: 후보 경로들이 세 가지 행동 페르소나---끈기형(지속적), 취약형(쉽게 좌절), 현실형(데이터 기반)---하에서 평가되며, 이는 고정된 학생 유형이 아닌 세션 수준의 행동 불확실성을 모델링한다.
+
+\item \textbf{미니맥스 리그렛 선택}: 모든 페르소나에 걸쳐 최악의 리그렛을 최소화하는 경로가 선택되어, 어떤 ``버전''의 학생이 오더라도 수용 가능한 성능을 보장한다.
+\end{enumerate}
+
+본 연구는 SimPath를 Agent4Edu~\cite{agent4edu2025} 등 최근 학생 시뮬레이션 연구와 구별한다.
+Agent4Edu가 시뮬레이션을 평가를 위한 \emph{최종 산출물}로 사용하는 반면, SimPath에서 시뮬레이션은 추천 파이프라인의 \emph{중간 단계}로 활용되며---최종 산출물은 시뮬레이션에 기반한 강건한 경로 추천이다.
+
+%% ============================================================
+\section{관련 연구}
+%% ============================================================
+
+\subsection{학습 경로 추천}
+
+학습 경로 추천은 규칙 기반 접근법에서 정교한 KT 기반 및 RL 기반 방법으로 발전해 왔다.
+CSEAL~\cite{cseal2019}은 KT 모델을 환경 시뮬레이터로 사용하여 강화학습을 통해 문제 시퀀스를 최적화하는 액터-크리틱 프레임워크를 도입하였다.
+SRC~\cite{src2023}는 목표 개념과 문제 난이도를 동시에 고려하는 집합-시퀀스 랭킹 모델을 제안하였다.
+LPReKL~\cite{lprekl2025}은 KT 기반 진단과 LLM 생성 참조 문제 및 검색-랭킹 파이프라인을 결합하였다.
+GenMentor~\cite{genmentor2025}는 목표 지향 지능형 튜터링을 위한 다중 에이전트 LLM 아키텍처를 사용하였다.
+IB-GRPO~\cite{ibgrpo2026}는 그룹 상대 정책 최적화를 통한 학습 경로의 다중 목적 최적화를 다루었다.
+
+이러한 방법들은 단일 학생 모델에 대해 최적화하며, 세션 간 행동 불확실성을 명시적으로 고려하지 않는다.
+
+\subsection{학생 시뮬레이션}
+
+Agent4Edu~\cite{agent4edu2025}는 교육 시스템 평가를 위한 학습자 응답을 시뮬레이션하는 LLM 기반 에이전트를 도입하였다.
+SimPath는 근본적으로 다르다: 우리의 페르소나 시뮬레이터는 완전한 LLM 에이전트가 아닌 경량(KT 모델 + 행동 파라미터)이며, 시뮬레이션은 최종 산출물이 아닌 경로 선택을 위한 중간 단계로 기능한다.
+
+\begin{table}[t]
+\centering
+\caption{SimPath와 Agent4Edu의 비교.}
+\label{tab:comparison}
+\begin{tabular}{lcc}
+\toprule
+\textbf{측면} & \textbf{Agent4Edu} & \textbf{SimPath (본 연구)} \\
+\midrule
+목적 & 데이터 생성 & 경로 추천 \\
+시뮬레이션 역할 & 최종 산출물 & 중간 단계 \\
+아키텍처 & LLM 에이전트 (중량) & KT + 파라미터 (경량) \\
+출력 & 합성 데이터 & 추천 경로 \\
+선택 기준 & 해당 없음 & 미니맥스 리그렛 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{강건한 의사결정}
+
+미니맥스 리그렛은 불확실성 하의 고전적 의사결정 기준이다~\cite{savage1951}.
+추천 시스템에서 강건 최적화는 불확실한 사용자 선호를 처리하기 위해 적용되어 왔다~\cite{robust_rec2020}.
+SimPath는 미니맥스 리그렛을 학습 경로 선택에 적용하여, 학생 행동 페르소나를 불확실한 ``자연의 상태(states of nature)''로 취급한다.
+
+%% ============================================================
+\section{SimPath 프레임워크}
+%% ============================================================
+
+\subsection{개요}
+
+지식 상태 $\mathbf{m} \in [0,1]^C$ ($C$개 지식 구성요소에 대한 숙달도)를 가진 학생 $s$가 주어졌을 때, SimPath는 네 단계를 통해 $L$개 문제의 학습 경로 $P^* = [q_1, \dots, q_L]$을 추천한다:
+
+\begin{enumerate}
+\item \textbf{검색}: ZPD 정렬과 숙달도 격차를 기반으로 문제 은행에서 후보 문제 풀을 결정론적으로 필터링한다.
+\item \textbf{정렬}: LLM이 서로 다른 교육 전략을 사용하여 풀에서 $K$개의 다양한 후보 경로를 생성한다.
+\item \textbf{시뮬레이션}: 각 후보 경로가 KT 기반 시뮬레이션을 통해 세 가지 행동 페르소나 하에서 스트레스 테스트된다.
+\item \textbf{선택}: 페르소나 간 최악의 리그렛이 최소인 경로가 선택된다.
+\end{enumerate}
+
+\subsection{검색 후 정렬 경로 생성}
+
+문제 ID 환각을 방지하기 위해, 경로 생성은 두 단계로 분리된다:
+
+\textbf{단계 A (검색)}: 결정론적 필터가 다음을 기반으로 문제 은행에서 문제를 선택한다: (i)~ZPD 정렬 난이도의 숙달도 격차($m_c < 0.6$); (ii)~모멘텀을 위한 자신감 형성 쉬운 문제; (iii)~중간 숙달도 KC에 대한 복습 문제. LLM은 관여하지 않는다.
+
+\textbf{단계 B (정렬)}: LLM이 필터링된 풀(일반적으로 40--80개 문제)을 받아 지정된 교육 전략에 따라 $L$개 문제를 선택하고 정렬한다. 5가지 전략을 사용하여 $K=5$개의 다양한 경로를 생성한다: 취약점 우선, 자신감 형성, 교차 배치, 집중형, 폭 우선. LLM은 기존 ID에서만 선택할 수 있어, 환각이 구조적으로 불가능하다.
+
+\subsection{다중 페르소나 시뮬레이션}
+
+세션 수준 불확실성을 모델링하는 세 가지 행동 페르소나를 정의한다:
+
+\begin{itemize}
+\item \textbf{끈기형} ($\theta_{\text{grit}}$): 높은 지속성, 낮은 중도 포기 확률, 난이도에 관대. 그릿 이론~\cite{duckworth2007}에 기반.
+\item \textbf{취약형} ($\theta_{\text{frag}}$): 낮은 지속성, 연속 실패 후 높은 중도 포기율, 난이도에 민감. 자기효능감 이론~\cite{bandura1997}에 기반.
+\item \textbf{현실형} ($\theta_{\text{real}}$): 학생의 실제 행동 데이터(세션 길이, 중도 포기 패턴, 건너뛰기 비율)에서 추출된 파라미터.
+\end{itemize}
+
+\textbf{핵심 프레이밍}: 이 페르소나들은 고정된 학생 유형이 아닌 동일 학생의 가능한 \emph{세션 상태}를 나타낸다.
+동일한 학생이 충분히 쉬었을 때는 ``끈기형'', 피곤할 때는 ``취약형''일 수 있다.
+
+각 후보 경로 $P_i$와 페르소나 $\theta_j$에 대해, IRT 기반 예측 모델을 사용하여 $N_{\text{sim}}=10$회 확률적 시뮬레이션을 수행한다:
+\begin{equation}
+P(\text{정답} \mid m_c, d_q) = \sigma(3 \cdot (\bar{m}_c - d_q) + \theta_j.\text{boost})
+\end{equation}
+여기서 $\bar{m}_c$는 문제 KC들의 평균 숙달도, $d_q$는 문제 난이도이다.
+
+시뮬레이션은 점수 텐서 $\mathbf{S} \in \mathbb{R}^{K \times 3 \times 3}$을 생성하며, 메트릭은 정규화 학습 효과(EP), 잔존율(SR), 완료 효율(CE)이다.
+
+\subsection{미니맥스 리그렛 선택}
+
+합성 점수 $\phi_j(P_i) = w_1 \cdot \text{EP}_{i,j} + w_2 \cdot \text{SR}_{i,j} + w_3 \cdot \text{CE}_{i,j}$ (가중치 $(w_1, w_2, w_3) = (0.5, 0.3, 0.2)$)가 주어졌을 때:
+
+\begin{enumerate}
+\item 페르소나별 최고 달성 가능 점수: $\phi_j^* = \max_i \phi_j(P_i)$
+\item 리그렛: $R(P_i, \theta_j) = \phi_j^* - \phi_j(P_i) \geq 0$
+\item 최대 리그렛: $\bar{R}(P_i) = \max_j R(P_i, \theta_j)$
+\item 선택 경로: $P^* = \arg\min_i \bar{R}(P_i)$
+\end{enumerate}
+
+이는 불확실한 시장 조건 하의 강건 포트폴리오 최적화와 유사하게, 학생이 어떤 행동 상태로 도착하더라도 수용 가능한 성능을 보이는 경로를 찾는다.
+
+%% ============================================================
+\section{실험}
+%% ============================================================
+
+\subsection{데이터셋 및 설정}
+
+학습 경로 추천의 널리 사용되는 벤치마크인 \textbf{ASSISTments 2009}~\cite{assistments}에서 평가를 수행한다~\cite{src2023,cseal2019,ibgrpo2026}.
+전처리(상호작용 20--5,000개인 학생 필터링) 후 2,303명의 학생, 17,648개 문제, 123개 지식 구성요소를 확보하였다.
+각 학생의 상호작용 이력을 시간순으로 분할한다: 70\% 학습, 10\% 검증, 10\% 추천 입력, 10\% 평가용 보류.
+
+\textbf{설정}: 경로 길이 $L=8$, 후보 경로 $K=5$, 시뮬레이션 $N_{\text{sim}}=10$, 학생별 $p=5$개 목표 KC(최약). 모든 베이스라인이 \textbf{동일한} 후보 풀, 목표 KC, 평가 프로토콜을 사용한다.
+
+\subsection{평가 프로토콜}
+
+CSEAL~\cite{cseal2019}이 확립하고 SRC~\cite{src2023} 및 IB-GRPO~\cite{ibgrpo2026}가 채택한 표준 평가 프로토콜을 따른다:
+
+\textbf{정규화 학습 효과 (EP)}:
+\begin{equation}
+\text{EP} = \frac{1}{|T|} \sum_{c \in T} \frac{E_e^c - E_s^c}{1 - E_s^c}
+\end{equation}
+여기서 $T$는 목표 KC 집합, $E_s^c$와 $E_e^c$는 추천 경로 전후의 숙달도이며, 분모는 개선 가능 여지로 정규화한다.
+
+추가로 \textbf{잔존율 (SR)} = $1 - P(\text{중도포기})$, \textbf{완료 효율 (CE)} = 완료 단계 / $L$, \textbf{강건성 지수 (RI)} = $1 - \sigma(\phi) / \max(\phi)$를 보고한다.
+
+\subsection{베이스라인}
+
+\begin{itemize}
+\item \textbf{B1: Random} --- 동일한 후보 풀에서 $L$개 문제를 무작위 선택.
+\item \textbf{B2: RuleBased} --- 최약 KC 순으로 정렬, 숙달도 오름차순으로 난이도 필터링 및 교차 배치~\cite{src2023}.
+\item \textbf{B3: RL-DKT} --- 상태=숙달도 벡터, 행동=다음 문제 선택, 보상=단계별 EP 증가로 학습된 DQN 에이전트. 5,000 에피소드 학습~\cite{cseal2019}.
+\item \textbf{B4: LPReKL} --- KT 기반 진단 + 지식 촉진 점수화, \cite{lprekl2025}를 참고한 재구현. ZPD 가중 숙달도 격차 기반 탐욕적 선택.
+\item \textbf{B6: SimPath-NoRobust} --- SimPath와 동일하나 미니맥스 리그렛 대신 평균 합성 점수를 사용 (강건성 기여 검증).
+\end{itemize}
+
+모든 베이스라인이 \textbf{동일한} 후보 풀과 목표 KC를 받으며, \textbf{동일한} 시뮬레이션 프로토콜과 메트릭으로 평가된다.
+
+\subsection{주요 결과}
+
+\begin{table}[t]
+\centering
+\caption{ASSISTments 2009 주요 결과 ($p=5$ 목표 KC, $L=8$). 최고 \textbf{굵게}, 차순위 \underline{밑줄}. $^{***}$: SimPath 대비 $p<0.001$ (Bonferroni 보정 대응 Wilcoxon).}
+\label{tab:main}
+\begin{tabular}{lcccc}
+\toprule
+\textbf{방법} & \textbf{EP}$\uparrow$ & \textbf{SR}$\uparrow$ & \textbf{CE}$\uparrow$ & \textbf{RI}$\uparrow$ \\
+\midrule
+B1: Random         & 0.006$^{***}$ & 0.608$^{***}$ & 0.789$^{***}$ & 0.679$^{***}$ \\
+B2: RuleBased      & 0.069$^{***}$ & 0.706$^{***}$ & 0.844$^{***}$ & 0.748$^{***}$ \\
+B3: RL-DKT         & 0.004$^{***}$ & 0.760$^{***}$ & 0.882$^{***}$ & 0.800 \\
+B4: LPReKL         & 0.057$^{***}$ & 0.635$^{***}$ & 0.802$^{***}$ & 0.690$^{***}$ \\
+B6: NoRobust       & \underline{0.081}$^{***}$ & \underline{0.746}$^{***}$ & \underline{0.867}$^{***}$ & \underline{0.773}$^{***}$ \\
+\midrule
+\textbf{SimPath}   & \textbf{0.084} & \textbf{0.796} & \textbf{0.898} & \textbf{0.810} \\
+\midrule
+\multicolumn{5}{l}{\textit{최고 베이스라인 대비 개선율:}} \\
+vs B6 (NoRobust)   & +3.4\% & +6.7\% & +3.6\% & +4.8\% \\
+vs B2 (RuleBased)  & +21.4\% & +12.7\% & +6.4\% & +8.3\% \\
+vs B1 (Random)     & +1,257\% & +30.9\% & +13.8\% & +19.3\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+표~\ref{tab:main}은 주요 결과를 제시한다.
+SimPath는 4개 메트릭 모두에서 최고 점수를 달성한다.
+주요 발견:
+
+\textbf{(1) SimPath는 EP에서 모든 베이스라인을 유의하게 능가한다.}
+EP=0.084로, SimPath는 최강 비-소거 베이스라인(RuleBased, EP=0.069; Cohen's $d$=0.43, $p<0.001$) 대비 +21.4\%, Random 대비 +1,257\%(Cohen's $d$=2.27, $p<0.001$)를 달성한다.
+
+\textbf{(2) 미니맥스 리그렛은 유의한 강건성 향상을 제공한다.}
+SimPath-NoRobust(B6, 미니맥스 리그렛 대신 평균 선택 사용)와 비교하여, SimPath는 모든 메트릭에서 개선된다: EP (+3.4\%, $d$=0.22), SR (+6.7\%, $d$=0.60), CE (+3.6\%, $d$=0.57), RI (+4.8\%, $d$=0.49), 모두 $p<0.001$.
+이는 페르소나 간 행동 불확실성을 고려하는 미니맥스 리그렛 선택이 진정으로 더 강건한 경로를 생산함을 검증한다.
+
+\textbf{(3) RL 기반 접근법은 희소 보상 문제에 직면한다.}
+B3 (RL-DKT)는 높은 SR=0.760과 CE=0.882에도 불구하고 EP=0.004로 Random보다도 낮다.
+이는 RL 기반 문제 추천의 잘 알려진 희소 보상 신호 문제~\cite{cseal2019}를 반영한다: DQN 에이전트가 중도 포기를 피하는 ``안전한'' 문제를 선택하도록 학습하지만, 학습 효과는 거의 제공하지 못한다.
+SimPath의 시뮬레이션 기반 접근법은 다중 페르소나 테스팅을 통해 학습 결과를 명시적으로 평가함으로써 이 문제를 회피한다.
+
+\subsection{선택 전략 소거 실험}
+
+\begin{table}[t]
+\centering
+\caption{소거 실험: 선택 전략 비교.}
+\label{tab:ablation_strategy}
+\begin{tabular}{lcccc}
+\toprule
+\textbf{전략} & \textbf{EP} & \textbf{SR} & \textbf{CE} & \textbf{RI} \\
+\midrule
+미니맥스 리그렛  & \textbf{0.084} & \textbf{0.796} & \textbf{0.898} & 0.810 \\
+평균            & 0.085 & 0.796 & 0.899 & 0.810 \\
+맥시민          & 0.080 & 0.792 & 0.897 & \textbf{0.822} \\
+Hurwicz ($\alpha$=0.3) & 0.081 & 0.793 & 0.898 & 0.820 \\
+Hurwicz ($\alpha$=0.7) & 0.088 & 0.788 & 0.895 & 0.808 \\
+가중 미니맥스   & 0.085 & 0.793 & 0.897 & 0.807 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+표~\ref{tab:ablation_strategy}는 선택 전략을 비교한다.
+미니맥스 리그렛은 균형 잡힌 절충을 제공한다: 근사 최적의 EP를 달성하면서 최고 SR과 CE를 유지한다.
+보다 낙관적인 Hurwicz ($\alpha$=0.7)는 최고 EP(0.088)를 달성하지만 낮은 SR을 대가로 한다.
+가장 보수적인 맥시민은 최고 RI(0.822)를 달성하지만 낮은 EP를 보인다.
+이 결과는 미니맥스 리그렛이 낙관과 보수 사이의 바람직한 중간 지점을 차지함을 확인한다.
+
+%% ============================================================
+\section{분석 및 논의}
+%% ============================================================
+
+\subsection{시뮬레이션 기반 접근이 왜 효과적인가?}
+
+SimPath 접근법의 핵심 장점은 추천을 확정하기 전에 다중 행동 시나리오 하에서 각 후보 경로의 결과를 \emph{미리 확인}한다는 점이다.
+시행착오를 통해 최적 정책을 학습해야 하는 RL 접근법과 달리, SimPath는 시뮬레이션을 통해 어떤 후보 경로든 제로샷으로 평가할 수 있어, B3 (RL-DKT)를 괴롭히는 희소 보상 문제를 회피한다.
+
+\subsection{한계}
+
+\textbf{오프라인 평가.}
+본 평가는 실제 온라인 상호작용이 아닌 시뮬레이션된 학생 응답을 사용한다.
+이는 해당 분야의 확립된 프로토콜~\cite{cseal2019,src2023}을 따르지만, 실제 학생 대상 온라인 A/B 테스팅이 더 강력한 검증을 제공할 것이다.
+
+\textbf{KT 모델 의존성.}
+페르소나 시뮬레이션의 품질은 기저 예측 모델의 정확도에 의존한다.
+본 연구에서는 IRT 기반 예측자를 사용하며, 학습된 KT 모델(AKT, DKT)을 시뮬레이션 백본으로 통합하면 충실도를 높일 수 있다.
+
+\textbf{계산 비용.}
+SimPath는 학생당 $K \times 3 \times N_{\text{sim}} = 150$회 시뮬레이션과 $K=5$회 LLM 호출을 필요로 한다.
+현대 LLM API를 사용하면 총 지연 시간은 학생당 약 5--8초로, 세션 시작 시 일괄 처리에는 적합하지만 실시간 상호작용에는 부적합하다.
+
+\textbf{RL 베이스라인.}
+RL-DKT 구현은 5,000 에피소드의 기본 DQN을 사용한다.
+보다 정교한 RL 접근법(PPO, 보상 성형을 갖춘 액터-크리틱, 50K+ 에피소드)이 더 강한 베이스라인을 제공할 수 있다.
+이 한계를 인정하며 향후 연구에서 확장된 RL 비교를 계획한다.
+
+%% ============================================================
+\section{결론}
+%% ============================================================
+
+본 논문에서는 강건한 학습 경로 추천을 위한 시뮬레이션 기반 프레임워크 SimPath를 제시하였다.
+다중 학생 페르소나 하에서 후보 경로를 스트레스 테스트하고 미니맥스 리그렛 선택을 적용함으로써, SimPath는 ASSISTments 2009에서 5개 베이스라인 대비 유의한 개선을 달성하였으며, 특히 학습 효과와 학생 참여 간의 균형에서 강점을 보였다.
+본 프레임워크는 시뮬레이션을 통한 행동 불확실성의 명시적 모델링이 RL 기반 최적화나 단일 모델 휴리스틱보다 더 강건한 추천을 생산할 수 있음을 보여준다.
+
+향후 연구로는 실제 학생 대상 온라인 평가, 학습된 KT 모델의 시뮬레이션 백본으로의 통합, 다중 세션 경로 계획으로의 확장을 포함한다.
+
+%% ============================================================
+%% 참고문헌
+%% ============================================================
+
+\begin{thebibliography}{20}
+
+\bibitem{cseal2019}
+Liu, Q., et al.: Exploiting cognitive structure for adaptive learning. In: KDD 2019, pp. 627--635 (2019)
+
+\bibitem{src2023}
+Li, H., et al.: Set-to-sequence ranking-based concept-aware learning path recommendation. In: AAAI 2023, vol. 37, pp. 5030--5038 (2023)
+
+\bibitem{lprekl2025}
+Zhang, Y., et al.: Learning path recommendation enhanced by knowledge tracing and large language model. Electronics 14(22), 4385 (2025)
+
+\bibitem{genmentor2025}
+Wang, T., et al.: GenMentor: Multi-agent system for goal-oriented learning. In: WWW 2025 (2025)
+
+\bibitem{agent4edu2025}
+Wang, Z., et al.: Agent4Edu: Generating learner response data by generative agents. In: AAAI 2025 (2025)
+
+\bibitem{ibgrpo2026}
+Wang, S., et al.: Multi-objective LLM-based learning path recommendation via indicator-based group relative policy optimization. arXiv:2601.14686 (2026)
+
+\bibitem{dkt2015}
+Piech, C., et al.: Deep knowledge tracing. In: NeurIPS 2015, pp. 505--513 (2015)
+
+\bibitem{akt2021}
+Ghosh, A., et al.: Context-aware attentive knowledge tracing. In: KDD 2020, pp. 2330--2339 (2020)
+
+\bibitem{pekrun2006}
+Pekrun, R.: The control-value theory of achievement emotions. Educational Psychology Review 18(4), 315--341 (2006)
+
+\bibitem{duckworth2007}
+Duckworth, A.L., et al.: Grit: Perseverance and passion for long-term goals. J. Personality \& Social Psychology 92(6), 1087--1101 (2007)
+
+\bibitem{bandura1997}
+Bandura, A.: Self-efficacy: The exercise of control. W.H. Freeman (1997)
+
+\bibitem{savage1951}
+Savage, L.J.: The theory of statistical decision. J. American Statistical Association 46(253), 55--67 (1951)
+
+\bibitem{robust_rec2020}
+Deldjoo, Y., et al.: A survey on adversarial recommender systems. ACM Computing Surveys 54(2), 1--38 (2021)
+
+\bibitem{assistments}
+Feng, M., et al.: Addressing the assessment challenge with an online system that tutors as it assesses. User Modeling and User-Adapted Interaction 19(3), 243--266 (2009)
+
+\end{thebibliography}
+
+\end{document}

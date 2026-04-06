@@ -1,0 +1,1121 @@
+# SimPath: Technical Specification v2.0
+# (Reviewer-Hardened Edition)
+
+> **Full title**: SimPath: Simulation-in-the-Loop Learning Path Recommendation
+> via Robust Student Persona Testing
+> **Target venues**: AIED 2026 Main Track / RecSys 2026
+> **Version**: 2.0 — March 2026
+> **Changelog from v1**: Reviewer defense strategies integrated throughout.
+> Model choices updated. Circular evaluation fix. Persona validation added.
+> Retrieve-then-order path generation. Terminology adjusted.
+
+---
+
+## 0. Notation Table
+
+| Symbol | Type | Description |
+|--------|------|-------------|
+| $\mathcal{S} = \{s_1, \dots, s_N\}$ | set | All students in dataset |
+| $\mathcal{Q} = \{q_1, \dots, q_M\}$ | set | All questions/exercises |
+| $\mathcal{K} = \{k_1, \dots, k_C\}$ | set | Knowledge components (KC) |
+| $\mathbf{h}_n$ | sequence | Interaction history of student $n$: $[(q_1, r_1, t_1), \dots]$; $r_i \in \{0,1\}$, $t_i$ = timestamp |
+| $\mathbf{m}_n \in [0,1]^C$ | vector | Knowledge state of student $n$; $m_n^c$ = mastery of KC $c$ |
+| $P = [q_{i_1}, \dots, q_{i_L}]$ | sequence | Learning path of length $L$ |
+| $\mathcal{P} = \{P_1, \dots, P_K\}$ | set | $K$ candidate paths |
+| $\Theta = \{\theta_{\text{grit}}, \theta_{\text{frag}}, \theta_{\text{real}}\}$ | set | Three persona simulators |
+| $\phi_j(P_i)$ | scalar | Composite score of path $P_i$ under persona $\theta_j$ |
+| $R(P_i, \theta_j)$ | scalar | Regret of path $P_i$ under persona $\theta_j$ |
+
+**Terminology note**: We use "persona simulator" (not "agent") for the
+student models. The term "agent" is reserved for the LLM components that
+perform generation and explanation. This distinction avoids inflated claims
+about agent autonomy. [Defense: Reviewer #8]
+
+---
+
+## 1. Key Design Decisions (Reviewer-Driven)
+
+This section documents architectural choices made specifically to preempt
+known reviewer concerns. Each links to the attack point it addresses.
+
+### 1.1 Separate KT Models for Recommendation vs Evaluation [Defense: #1]
+
+```
+KT_recommend = AKT   (used in path generation + persona simulation)
+KT_evaluate  = SAINT (used only for offline evaluation metrics)
+
+Rationale: If the same KT model generates recommendations AND evaluates them,
+any model bias appears as inflated performance. Using two structurally different
+KT models (attention-based AKT vs transformer-based SAINT) breaks this
+circularity. Additionally, we report correlation with held-out ground truth
+(see Section 7.2).
+```
+
+### 1.2 Retrieve-Then-Order Path Generation [Defense: #5]
+
+```
+Instead of letting the LLM freely generate question_ids (hallucination risk),
+we split path generation into:
+  Step A: RETRIEVAL — deterministic filtering of question pool based on
+          KC mastery, difficulty range, staleness. Pure code, no LLM.
+  Step B: ORDERING — LLM receives the filtered pool and decides the
+          optimal sequence. LLM can only SELECT from existing IDs.
+
+This makes hallucination structurally impossible. The LLM cannot invent
+question_ids because it only sees real ones.
+```
+
+### 1.3 Persona Validation via Data Clustering [Defense: #2]
+
+```
+Before running experiments, validate persona definitions:
+  1. Extract behavioral features for ALL students in training set:
+     - avg_session_length, dropout_after_k_wrong (k=1..5),
+       avg_elapsed_time, skip_rate, overall_accuracy
+  2. Run k-means clustering (k=3) on standardized features
+  3. Compare cluster centroids to θ_grit, θ_frag, θ_real parameters
+  4. Report cosine similarity between centroids and persona definitions
+  5. Visualize with t-SNE / UMAP — include as Figure in paper
+
+This provides empirical evidence that our 3 personas correspond to
+naturally occurring student subpopulations, not arbitrary constructs.
+```
+
+### 1.4 Persona = Session State, Not Student Type [Defense: #4]
+
+```
+CRITICAL FRAMING (use in Introduction + Related Work):
+
+Personas do NOT represent fixed student types.
+The same student can be "Gritty" on Monday morning (well-rested,
+motivated) and "Fragile" on Friday night (tired, distracted).
+
+Therefore, personas model the UNCERTAINTY OF SESSION-LEVEL BEHAVIOR,
+not the uncertainty of student identity. This justifies minimax regret:
+we don't know which "version" of the student will show up today.
+
+Supporting citation: Pekrun (2006) — emotions and motivation fluctuate
+within individuals across learning sessions.
+```
+
+### 1.5 Model Choices [Defense: #6]
+
+```
+PRIMARY MODELS (main experiments):
+  - GPT-5.4         (for path ordering + explanation generation)
+  - Claude Sonnet 4.6 (for path ordering + explanation generation)
+
+Both are used for ALL main experiments. Every result table reports both.
+This demonstrates model-agnostic performance across two different LLM
+families (OpenAI vs Anthropic).
+
+ABLATION (secondary):
+  - Open-source models (Llama-3.1-8B, Qwen2.5-7B) as future extension
+  - Mentioned in Discussion as planned reproducibility experiment
+
+LOGGING:
+  - Record exact model version strings (e.g., "gpt-5.4-2026-03-05",
+    "claude-sonnet-4-6")
+  - Log all prompts and responses for reproducibility
+  - Temperature, seed, max_tokens fixed and reported
+```
+
+### 1.6 Agent4Edu Differentiation [Defense: #7]
+
+```
+Use this framing consistently throughout the paper:
+
+  Agent4Edu (AAAI 2025) = "simulation FOR evaluation"
+    → Generates synthetic student data to evaluate existing systems
+    → Simulation is the END PRODUCT
+
+  SimPath (Ours) = "simulation FOR recommendation"
+    → Simulates student personas to STRESS-TEST candidate paths
+    → Simulation is an INTERMEDIATE STEP in the recommendation pipeline
+    → The end product is a ROBUST RECOMMENDATION + EXPLANATION
+
+Additionally, SimPath's persona simulators are lightweight (KT + params),
+not full LLM agents like Agent4Edu. This is a deliberate design choice
+for cost efficiency (see Section 9).
+
+Include comparison table in Related Work:
+
+| Aspect         | Agent4Edu          | SimPath (Ours)        |
+|----------------|--------------------|-----------------------|
+| Purpose        | Data generation    | Path recommendation   |
+| Simulation     | End product        | Intermediate step     |
+| Architecture   | LLM agent (heavy)  | KT + params (light)   |
+| Output         | Synthetic data     | Recommended path      |
+| Selection      | N/A                | Minimax regret        |
+| Explainability | N/A                | Simulation-grounded   |
+```
+
+---
+
+## 2. Data Preprocessing Pipeline
+
+### 2.1 Dataset Selection
+
+**Primary: EdNet KT3**
+- Source: https://github.com/riiid/ednet
+- Level: KT3 (question-response + explanation + elapsed time)
+- Size: ~297K students, 13,169 questions, 293 skill tags
+- Domain: TOEIC English (listening + reading)
+
+**Secondary: ASSISTments 2015**
+- Source: https://sites.google.com/site/assistmaborern/
+- Size: ~19,917 students, 100 skills
+- Domain: Middle school mathematics
+
+**Domain diversity justification [Defense: #9]**: Using two completely
+different domains (English testing vs math) demonstrates that SimPath is
+domain-agnostic. If results are consistent across both, this is STRONGER
+evidence than using two math datasets.
+
+### 2.2 Preprocessing Steps
+
+```
+INPUT:  raw interaction logs
+OUTPUT: cleaned sequences + behavioral features + question metadata
+
+Step 1: Filter students with < 20 or > 5000 interactions
+Step 2: Extract per-interaction features:
+        - question_id, skill_tags (KC ids), correctness (0/1)
+        - elapsed_time (seconds), timestamp (unix)
+Step 3: Sort by timestamp within each student
+Step 4: Compute per-question difficulty:
+        difficulty(q) = 1 - (# correct / # total responses)
+Step 5: Split each student's sequence:
+        - First 70%  → KT training set
+        - Next 10%   → KT validation set
+        - Next 10%   → SimPath recommendation input (recent history)
+        - Last 10%   → Held-out ground truth (NEVER used by SimPath)
+                        [Defense: #1 — separate evaluation data]
+Step 6: Build skill-question mapping
+Step 7: Extract per-student behavioral features (for Realistic persona +
+        for persona validation clustering):
+        - avg_session_length (gap > 30min = new session)
+        - dropout_pattern: P(leave | consec_wrong >= k) for k=1..5
+        - avg_elapsed_time per question
+        - skip_rate: fraction answered in < 5 seconds
+        - accuracy_by_difficulty_bin: [easy, medium, hard]
+```
+
+### 2.3 Persona Validation Clustering [Defense: #2]
+
+```
+PROCEDURE validate_personas(all_students):
+  # Extract behavioral feature vectors
+  features = []
+  FOR student_n in all_students:
+    f = [
+      avg_session_length(n),
+      dropout_rate_at_k2(n),     # P(leave | 2 consec wrong)
+      avg_elapsed_time(n),
+      skip_rate(n),
+      overall_accuracy(n)
+    ]
+    features.append(standardize(f))
+
+  # Cluster
+  kmeans = KMeans(n_clusters=3, random_state=42, n_init=10)
+  labels = kmeans.fit_predict(features)
+  centroids = kmeans.cluster_centers_
+
+  # Compare to persona definitions
+  θ_grit_vec = standardize([high_session, low_dropout, high_time, low_skip, high_acc])
+  θ_frag_vec = standardize([low_session, high_dropout, low_time, high_skip, low_acc])
+  θ_real_vec = centroids[largest_cluster]  # most common type
+
+  FOR i, centroid in enumerate(centroids):
+    print(f"Cluster {i}: cosine_sim to Gritty={cosine(centroid, θ_grit_vec):.3f}, "
+          f"Fragile={cosine(centroid, θ_frag_vec):.3f}")
+
+  # Visualize with UMAP
+  reducer = UMAP(n_components=2, random_state=42)
+  embedding = reducer.fit_transform(features)
+  # Plot with cluster colors → Figure 2 in paper
+
+  RETURN centroids, labels, cosine_similarities
+```
+
+**Expected output**: One cluster aligns with Gritty (high persistence,
+long sessions), one with Fragile (high dropout, short sessions), one in
+between (Realistic). Report cosine similarities in paper.
+
+---
+
+## 3. Knowledge Tracing Models (Phase 1)
+
+### 3.1 Two-Model Setup [Defense: #1]
+
+```
+MODEL A: AKT (Attentive Knowledge Tracing)
+  - Used for: path generation, persona simulation
+  - Why: strong per-KC mastery estimation, attention mechanism
+
+MODEL B: SAINT (Separated Attentive INternet-based Tracing)
+  - Used for: offline evaluation ONLY
+  - Why: transformer encoder-decoder, structurally different from AKT
+  - This separation breaks circular evaluation
+
+Both models trained on the SAME training data (Step 5 first 70%).
+Both validated on the SAME validation data (Step 5 next 10%).
+```
+
+### 3.2 Training Hyperparameters
+
+```
+AKT:
+  embedding_dim=256, num_heads=8, num_blocks=4, dropout=0.1
+  lr=1e-3, batch_size=64, max_seq_len=200, epochs=100
+  early_stopping: patience=10 on validation AUC
+
+SAINT:
+  d_model=256, num_heads=8, enc_layers=4, dec_layers=4, dropout=0.1
+  lr=1e-3, batch_size=64, max_seq_len=200, epochs=100
+  early_stopping: patience=10 on validation AUC
+
+Loss: Binary cross-entropy
+  L = -(1/T) * Σ [r_t * log(p_t) + (1-r_t) * log(1-p_t)]
+```
+
+### 3.3 Knowledge State Extraction
+
+```
+FUNCTION extract_knowledge_state(kt_model, history_n):
+  """
+  INPUT:  trained KT model, student interaction history
+  OUTPUT: mastery vector m_n ∈ [0,1]^C
+  """
+  Feed history_n through kt_model
+
+  FOR each KC c:
+    last_interaction_with_c = find_last(history_n, kc=c)
+    IF last_interaction_with_c exists:
+      m_n[c] = kt_model.predict_mastery(history_n, c, at=last_interaction)
+    ELSE:
+      # Never encountered: use population prior
+      m_n[c] = population_mean_accuracy(c)
+
+  RETURN m_n
+```
+
+### 3.4 KT Simulation Function
+
+```
+FUNCTION simulate_kt(kt_model, m_n, path P, persona_params θ):
+  """
+  Simulates a student walking through path P under persona θ.
+  Returns trajectory, final mastery, and dropout status.
+
+  NOTE: This uses kt_model = AKT (recommendation model).
+  Evaluation uses a SEPARATE model (SAINT). [Defense: #1]
+  """
+  m_current = m_n.copy()
+  trajectory = []
+  dropout = False
+  consecutive_wrong = 0
+
+  FOR step t = 1 to |P|:
+    q_t = P[t]
+    kc_t = skill_tags(q_t)
+    diff_t = difficulty(q_t)
+
+    # --- Skip check ---
+    IF θ.skip_threshold is not None AND diff_t > θ.skip_threshold:
+      IF Bernoulli(0.5):
+        trajectory.append({q: q_t, result: "skip", m: m_current.copy()})
+        consecutive_wrong += 1  # skip counts as failure for dropout
+        GOTO dropout_check
+
+    # --- Predict correctness ---
+    p_correct = kt_model.predict(m_current, q_t)
+    p_adjusted = clip(p_correct + θ.p_correct_boost, 0.01, 0.99)
+    r_t = Bernoulli(p_adjusted)
+
+    # --- Update mastery ---
+    FOR each kc in kc_t:
+      IF r_t == 1:
+        m_current[kc] += θ.learn_rate * (1 - m_current[kc])
+        consecutive_wrong = 0
+      ELSE:
+        m_current[kc] -= θ.forget_penalty * m_current[kc] * 0.1
+        consecutive_wrong += 1
+
+    trajectory.append({q: q_t, result: r_t, m: m_current.copy()})
+
+    # --- Dropout check ---
+    dropout_check:
+    p_dropout = min(1.0, θ.dropout_base(consecutive_wrong) *
+                         (1 + θ.difficulty_sensitivity * diff_t))
+    IF Bernoulli(p_dropout):
+      dropout = True
+      BREAK
+
+  RETURN {
+    final_mastery: m_current,
+    trajectory: trajectory,
+    dropout: dropout,
+    steps_completed: len(trajectory),
+    steps_total: |P|
+  }
+```
+
+---
+
+## 4. Path Generation (Phase 2) — Retrieve-Then-Order
+
+**[Defense: #5] Hallucination-proof design**: LLM never generates question
+IDs. It only orders questions that were deterministically retrieved.
+
+### 4.1 Step A: Deterministic Retrieval
+
+```
+FUNCTION retrieve_candidate_pool(m_n, student_n):
+  """
+  No LLM involved. Pure rule-based filtering.
+  OUTPUT: filtered question pool (typically 30-80 questions)
+  """
+  pool = []
+
+  # 1. Weak KC questions: mastery < 0.6
+  weak_kcs = {c: m_n[c] for c in K if m_n[c] < 0.6}
+  FOR c in weak_kcs:
+    # ZPD filter: difficulty ∈ [mastery - 0.1, mastery + 0.3]
+    zpd_low = max(0.0, m_n[c] - 0.1)
+    zpd_high = min(1.0, m_n[c] + 0.3)
+    questions = [q for q in Q if c in skill_tags(q)
+                               and zpd_low <= difficulty(q) <= zpd_high]
+    pool.extend(questions[:10])  # cap per KC to avoid imbalance
+
+  # 2. Stale KC questions: last practiced > 14 days ago
+  FOR c in K:
+    days = days_since_last_practice(student_n, c)
+    IF days > 14 and m_n[c] < 0.8:  # don't review fully mastered
+      review_qs = [q for q in Q if c in skill_tags(q)
+                                 and difficulty(q) <= m_n[c] + 0.1]
+      pool.extend(review_qs[:3])  # fewer review questions
+
+  # 3. Deduplicate
+  pool = list(set(pool))
+
+  # 4. Sanity check: need at least L questions
+  IF len(pool) < L:
+    # Expand ZPD range
+    pool = expand_zpd_range(m_n, target_size=L*2)
+
+  RETURN pool
+```
+
+### 4.2 Step B: LLM-Based Ordering
+
+```
+FUNCTION generate_candidate_paths(m_n, pool, K=5, L=8):
+  """
+  LLM receives the pool and produces K different orderings of L questions.
+  LLM CANNOT hallucinate question_ids — they all come from pool.
+  """
+  pool_description = format_pool(pool)
+  # Format: "q_1234 | KC: fractions, ratios | difficulty: 0.45"
+
+  paths = []
+  FOR i = 1 to K:
+    prompt = PATH_ORDERING_PROMPT.format(
+      mastery_state=format_mastery(m_n),
+      question_pool=pool_description,
+      path_length=L,
+      previous_paths=format_previous(paths) if i > 1 else "None",
+      strategy_hint=STRATEGY_HINTS[i]  # different strategy per path
+    )
+    response = LLM.generate(prompt, temperature=0.6)
+    path_i = parse_json_array(response)
+
+    # Validate: all IDs must be in pool
+    path_i = [q for q in path_i if q in pool_ids]
+    path_i = deduplicate(path_i)[:L]
+
+    # Fill if short (should rarely happen with retrieve-then-order)
+    WHILE len(path_i) < L:
+      filler = random.choice([q for q in pool if q not in path_i])
+      path_i.append(filler)
+
+    paths.append(path_i)
+
+    # LOG for reproducibility [Defense: #6]
+    log_llm_call(prompt, response, model_version, temperature)
+
+  RETURN paths
+```
+
+### 4.3 Strategy Hints for Diversity
+
+```
+STRATEGY_HINTS = {
+  1: "Prioritize the weakest KCs first, gradually increasing difficulty.",
+  2: "Start with a confidence-building easy question, then tackle weak areas.",
+  3: "Interleave weak KCs with stale review KCs throughout the path.",
+  4: "Focus on the single weakest KC with intensive practice (3-4 questions).",
+  5: "Spread across as many different weak KCs as possible (breadth-first)."
+}
+```
+
+### 4.4 Path Ordering Prompt Template
+
+```
+PATH_ORDERING_PROMPT = """
+You are an expert educational path planner. Select and order exactly
+{path_length} questions from the pool below to create an optimal
+learning path for this student.
+
+## Student Knowledge State
+{mastery_state}
+
+## Available Question Pool
+{question_pool}
+
+## Strategy
+{strategy_hint}
+
+## Constraints
+1. Select exactly {path_length} questions from the pool above.
+2. Do NOT invent question IDs — use ONLY IDs from the pool.
+3. No more than 2 consecutive questions on the same KC (interleaving).
+4. Difficulty should have a coherent progression (not random jumps).
+
+## Previously Generated Paths (ensure diversity)
+{previous_paths}
+
+## Output
+Return ONLY a JSON array of question_ids:
+["q_1234", "q_5678", ...]
+"""
+```
+
+### 4.5 Hallucination Rate Tracking [Defense: #5]
+
+```
+METRICS TO REPORT:
+  - pool_hit_rate: % of LLM-selected IDs that exist in pool
+    (should be ~100% with retrieve-then-order)
+  - constraint_violation_rate: % of paths violating interleaving rule
+  - fill_rate: % of path slots filled by fallback filler
+    (lower = better LLM compliance)
+
+Report these in paper as evidence of generation reliability.
+```
+
+---
+
+## 5. Persona Simulation (Phase 3)
+
+### 5.1 Persona Parameter Definitions
+
+```
+θ_grit (Gritty Persona):
+  learn_rate:              0.15
+  forget_penalty:          0.05
+  dropout_base:            λ(k) = 0.02 * k       # k = consecutive wrong
+  difficulty_sensitivity:  0.2
+  skip_threshold:          None                    # never skips
+  p_correct_boost:         +0.05
+  time_multiplier:         1.3
+
+θ_frag (Fragile Persona):
+  learn_rate:              0.10
+  forget_penalty:          0.10
+  dropout_base:            λ(k) = 0.15 * k^1.5    # aggressive dropout
+  difficulty_sensitivity:  0.5                     # very sensitive to hard Qs
+  skip_threshold:          0.7                     # skips difficulty > 0.7
+  p_correct_boost:         -0.08
+  time_multiplier:         0.7
+
+θ_real (Realistic Persona — per-student):
+  All parameters extracted from student n's actual data.
+  See Section 5.2.
+```
+
+**Theoretical grounding [Defense: #2]**:
+- Gritty: Duckworth et al. (2007) "Grit: Perseverance and Passion for
+  Long-Term Goals" — high persistence, delayed gratification
+- Fragile: Bandura (1997) "Self-Efficacy" — low self-efficacy leads to
+  task avoidance and early termination under difficulty
+- Realistic: Data-driven, no theoretical assumption
+
+### 5.2 Realistic Persona Extraction
+
+```
+FUNCTION extract_realistic_params(student_n, history):
+  sessions = split_into_sessions(history, gap_minutes=30)
+
+  # Learn rate
+  correct_pairs = find_same_kc_consecutive_correct(history)
+  learn_rate = clip(mean([Δm for Δm in correct_pairs]), 0.01, 0.30)
+
+  # Forget penalty
+  gaps = find_same_kc_with_time_gap(history, min_days=3)
+  forget_penalty = clip(mean([max(0, m_before - m_after)
+                              for (m_before, m_after, _) in gaps]), 0.01, 0.20)
+
+  # Dropout curve (empirical)
+  dropout_counts = {k: {"end": 0, "cont": 0} for k in range(1, 6)}
+  FOR session in sessions:
+    consec = 0
+    FOR i, interaction in enumerate(session):
+      IF interaction.correct == 0:
+        consec += 1
+        IF consec in dropout_counts:
+          IF i == len(session) - 1:
+            dropout_counts[consec]["end"] += 1
+          ELSE:
+            dropout_counts[consec]["cont"] += 1
+      ELSE:
+        consec = 0
+
+  dropout_base = lambda k: (dropout_counts.get(k, {"end":1, "cont":1})["end"] /
+                             max(1, sum(dropout_counts.get(k, {"end":1, "cont":1}).values())))
+
+  # Difficulty sensitivity
+  difficulty_sensitivity = 0.3  # default, could be estimated
+
+  # Skip threshold
+  fast_answers = [q for q in history if q.elapsed_time < 5]
+  IF len(fast_answers) > 5:
+    skip_threshold = percentile([difficulty(q) for q in fast_answers], 25)
+  ELSE:
+    skip_threshold = None
+
+  # Time multiplier
+  pop_mean = global_mean_elapsed_time()
+  time_multiplier = mean(student_n.elapsed_times) / pop_mean
+
+  RETURN θ_real(learn_rate, forget_penalty, dropout_base,
+                difficulty_sensitivity, skip_threshold,
+                p_correct_boost=0.0, time_multiplier=time_multiplier)
+```
+
+### 5.3 Dropout Probability Formula
+
+$$P(\text{dropout} \mid k, d) = \min\left(1.0,\ \lambda_\theta(k) \cdot (1 + \alpha_\theta \cdot d)\right)$$
+
+- $k$ = consecutive wrong answers (including skips)
+- $d$ = difficulty of current question ∈ [0, 1]
+- $\lambda_\theta(k)$ = persona-specific base curve
+- $\alpha_\theta$ = persona-specific difficulty sensitivity
+
+### 5.4 Full Simulation Matrix
+
+```
+FUNCTION simulate_all_personas(kt_model, m_n, candidate_paths, θ_real_n):
+  """
+  Returns score tensor S of shape [K, 3, 3]
+  Axes: [path_index, persona_index, metric_index]
+  Metrics: [delta_mastery, survival_rate, completion_rate]
+  """
+  personas = [θ_grit, θ_frag, θ_real_n]
+  N_sim = 10  # simulations per (path, persona) for variance reduction
+  K = len(candidate_paths)
+  S = zeros(K, 3, 3)
+
+  FOR i in range(K):
+    FOR j in range(3):
+      results = []
+      FOR sim in range(N_sim):
+        # Fix seed for reproducibility: seed = hash(student_id, i, j, sim)
+        set_seed(hash_seed(student_n.id, i, j, sim))
+        result = simulate_kt(kt_model, m_n, candidate_paths[i], personas[j])
+        results.append(result)
+
+      # Aggregate
+      S[i][j][0] = mean([delta_mastery(m_n, r.final_mastery) for r in results])
+      S[i][j][1] = 1.0 - mean([float(r.dropout) for r in results])
+      S[i][j][2] = mean([r.steps_completed / r.steps_total for r in results])
+
+  RETURN S
+```
+
+### 5.5 Delta Mastery (focused on targeted KCs)
+
+$$\Delta\text{mastery} = \frac{1}{|W|} \sum_{c \in W} \max\left(0,\ m_{\text{after}}^c - m_{\text{before}}^c\right)$$
+
+$W$ = KCs targeted by the path (weak ∪ stale KCs). Only counts improvement.
+
+---
+
+## 6. Robust Path Selection (Phase 4)
+
+### 6.1 Composite Score
+
+$$\phi_j(P_i) = w_1 \cdot S_{i,j,0} + w_2 \cdot S_{i,j,1} + w_3 \cdot S_{i,j,2}$$
+
+### 6.2 Dynamic Weights
+
+```
+FUNCTION compute_weights(m_n, behavioral_features):
+  w1, w2, w3 = 0.5, 0.3, 0.2  # mastery, survival, completion
+
+  # Dropout risk adjustment
+  IF behavioral_features.recent_dropout_rate > 0.3:
+    w2 += 0.15; w1 -= 0.10; w3 -= 0.05
+
+  # Low mastery adjustment
+  IF mean(m_n[weak_kcs]) < 0.3:
+    w1 += 0.10; w2 -= 0.05; w3 -= 0.05
+
+  # Normalize
+  total = w1 + w2 + w3
+  RETURN (w1/total, w2/total, w3/total)
+```
+
+### 6.3 Minimax Regret Selection
+
+**Step 1**: Best achievable score per persona:
+$$\phi_j^* = \max_{i} \phi_j(P_i)$$
+
+**Step 2**: Regret of path $P_i$ under persona $\theta_j$:
+$$R(P_i, \theta_j) = \phi_j^* - \phi_j(P_i) \geq 0$$
+
+**Step 3**: Maximum regret of path $P_i$ across all personas:
+$$\bar{R}(P_i) = \max_{j} R(P_i, \theta_j)$$
+
+**Step 4**: Select minimax regret path:
+$$P^* = \arg\min_{i} \bar{R}(P_i)$$
+
+**Interpretation [Defense: #4]**: Since personas represent possible
+session-level states of the SAME student (not different students),
+minimax regret finds the path that performs acceptably regardless of
+which mental state the student arrives in today. This is analogous to
+robust portfolio optimization under uncertain market conditions.
+
+### 6.4 Algorithm
+
+```
+FUNCTION select_robust_path(S, w):
+  K, J = S.shape[0], 3
+  phi = zeros(K, J)
+  FOR i in range(K):
+    FOR j in range(J):
+      phi[i][j] = w[0]*S[i][j][0] + w[1]*S[i][j][1] + w[2]*S[i][j][2]
+
+  phi_star = [max(phi[:, j]) for j in range(J)]
+
+  regret = zeros(K, J)
+  FOR i in range(K):
+    FOR j in range(J):
+      regret[i][j] = phi_star[j] - phi[i][j]
+
+  max_regret = [max(regret[i, :]) for i in range(K)]
+  best_idx = argmin(max_regret)
+
+  RETURN best_idx, regret, phi
+```
+
+### 6.5 Alternative Strategies (for Ablation 3)
+
+```
+average:           argmax_i mean_j(φ_j(P_i))
+maximin:           argmax_i min_j(φ_j(P_i))
+hurwicz(α=0.3):   argmax_i [0.3·max_j(φ) + 0.7·min_j(φ)]
+hurwicz(α=0.7):   argmax_i [0.7·max_j(φ) + 0.3·min_j(φ)]
+weighted_minimax:  same as minimax regret but Realistic persona gets 1.5× weight
+                   [Defense: #4 — ablation for reviewer who wants Realistic emphasis]
+```
+
+---
+
+## 7. Evaluation Protocol
+
+### 7.1 Held-Out Ground Truth Validation [Defense: #1]
+
+**This is the critical defense against circular evaluation.**
+
+```
+PROCEDURE ground_truth_validation(student_n, recommended_path):
+  """
+  Compare SimPath's PREDICTED mastery gain with ACTUAL performance
+  on held-out test data (last 10% of student's interactions).
+  """
+  # SimPath's prediction
+  predicted_gain = simulate_kt(AKT, m_n, recommended_path, θ_real_n).delta_mastery
+
+  # Actual performance on held-out data
+  test_interactions = student_n.held_out_data  # last 10%, never seen by SimPath
+  actual_kc_performance = {}
+  FOR interaction in test_interactions:
+    FOR kc in interaction.skill_tags:
+      IF kc in targeted_kcs(recommended_path):
+        actual_kc_performance.setdefault(kc, []).append(interaction.correct)
+
+  actual_mastery = {kc: mean(responses) for kc, responses in actual_kc_performance.items()}
+  actual_gain = mean([actual_mastery.get(c, m_n[c]) - m_n[c]
+                      for c in targeted_kcs(recommended_path)])
+
+  RETURN predicted_gain, actual_gain
+
+# Aggregate across all test students:
+# Report Pearson correlation between predicted_gains and actual_gains
+# Report RMSE between predicted and actual
+# This shows simulation fidelity independent of the evaluation KT model
+```
+
+### 7.2 Offline Evaluation (Main Metrics)
+
+**IMPORTANT**: Evaluation metrics use SAINT (Model B), NOT AKT (Model A).
+AKT is used only for recommendation. [Defense: #1]
+
+```
+FUNCTION offline_evaluate(saint_model, test_students, method):
+  results = {MG: [], SR: [], CE: [], RI: []}
+
+  FOR student_n in test_students:
+    m_n = extract_knowledge_state(saint_model, student_n.recent_history)
+
+    # Generate recommendation using the METHOD being evaluated
+    recommended_path = method.recommend(student_n, L=8)
+
+    # Evaluate with ALL THREE personas using SAINT (not AKT!)
+    persona_scores = []
+    FOR θ in [θ_grit, θ_frag, extract_realistic_params(student_n)]:
+      sims = [simulate_kt(saint_model, m_n, recommended_path, θ)
+              for _ in range(10)]
+      mg = mean([delta_mastery(m_n, s.final_mastery) for s in sims])
+      sr = 1.0 - mean([float(s.dropout) for s in sims])
+      ce = mean([s.steps_completed / s.steps_total for s in sims])
+
+      results[MG].append(mg)
+      results[SR].append(sr)
+      results[CE].append(ce)
+      persona_scores.append(w1*mg + w2*sr + w3*ce)
+
+    # Robustness Index
+    ri = 1.0 - (std(persona_scores) / max(max(persona_scores), 1e-8))
+    results[RI].append(ri)
+
+  RETURN {k: (mean(v), std(v)) for k, v in results.items()}
+```
+
+### 7.3 Metric Definitions
+
+| Metric | Formula | Range | Better |
+|--------|---------|-------|--------|
+| Mastery Gain (MG) | $(1/\|W\|)\sum_{c \in W} \max(0, m^c_{\text{after}} - m^c_{\text{before}})$ | [0, 1] | Higher |
+| Survival Rate (SR) | $1 - \text{mean}(\mathbb{1}[\text{dropout}])$ | [0, 1] | Higher |
+| Completion Eff. (CE) | $\text{steps\_completed} / L$ | [0, 1] | Higher |
+| Robustness Index (RI) | $1 - \sigma(\phi_1,\phi_2,\phi_3) / \max(\phi_j)$ | [0, 1] | Higher |
+
+### 7.4 Expert Preference Study (replaces user study) [Defense: #3]
+
+```
+DESIGN:
+  Participants: 30 educators (K-12 teachers + university instructors)
+  Recruitment: education conferences, online teacher communities
+
+  Task A — Path Quality Comparison:
+    Show 2 recommended paths (SimPath vs best baseline) side by side.
+    Blind labels ("Path A" vs "Path B"), randomized order.
+    Ask: "Which path is more educationally appropriate? (A / B / Equal)"
+    20 student cases per educator.
+
+  Task B — Explanation Quality:
+    Show SimPath's simulation-grounded explanation vs generic rule-based
+    explanation for the same recommended path.
+    Rate on 5-point Likert:
+      1. Usefulness: "Does this help you understand the recommendation?"
+      2. Trust: "Do you trust this recommendation based on the explanation?"
+      3. Pedagogical soundness: "Is the reasoning educationally valid?"
+
+  Analysis:
+    Task A: Binomial test (H0: 50/50 preference)
+    Task B: Paired Wilcoxon signed-rank test (SimPath vs baseline explanation)
+    Report: preference rate, mean Likert scores ± std, p-values
+```
+
+---
+
+## 8. Baselines
+
+### 8.1 Six Baselines
+
+```
+B1: DKT + Random
+  Train DKT. Identify weak KCs. Select L random questions from weak KCs.
+  No ordering optimization.
+
+B2: DKT + Rule-based
+  Train DKT. Sort KCs by mastery ascending (weakest first).
+  For each KC, select questions with difficulty in [mastery, mastery+0.2].
+  Fill path greedily, enforce interleaving.
+
+B3: RL-DKT
+  Train DKT. Use DQN agent: state=knowledge_state, action=next_question.
+  Reward = delta_mastery per step.
+  Train for 50K episodes, ε-greedy (ε=0.1) at test.
+
+B4: LPReKL (KT + LLM generate-and-retrieve)
+  KT for state estimation. LLM generates reference exercises.
+  Retrieve top-N similar from bank. KT computes knowledge promotion score.
+  Iterative refinement.
+  Implementation: follow published description + contact original authors.
+
+B5: GenMentor (Multi-agent LLM, no simulation)
+  5 LLM agents collaborating (no debate, no simulation stress-test).
+  Agents: Gap Identifier, Learner Profiler, Dynamic Simulator,
+          Path Scheduler, Content Creator.
+  Official code: https://github.com/GeminiLight/gen-mentor
+
+B6: SimPath-NoRobust (Ablation baseline)
+  Identical to SimPath but path selection = argmax(average score)
+  instead of minimax regret. Tests robustness contribution.
+```
+
+### 8.2 Baseline Fairness [Defense: #13]
+
+```
+PROTOCOL:
+  1. For baselines with public code (GenMentor): use official implementation
+  2. For baselines without code (LPReKL): reimplement following paper,
+     email original authors for clarification on ambiguous details
+  3. ALL baseline reimplementations will be released in our GitHub repo
+  4. Use the same LLM (GPT-5.4) for all LLM-based baselines to ensure
+     fair comparison (LLM quality is not the variable being tested)
+  5. Report: "We contacted the authors of [X] to verify our reimplementation.
+     [Response / No response received.]"
+```
+
+---
+
+## 9. Ablation Studies
+
+### 9.1 Ablation 1: Number of Personas
+
+```
+Variants:
+  (a) Realistic only (1 persona)
+  (b) Gritty + Fragile (2 personas, no data-driven)
+  (c) All 3 (default)
+  (d) All 3 + Sprint + Meticulous (5 personas)
+
+Sprint persona (cramming):
+  learn_rate=0.20, forget_penalty=0.15, dropout_base=0.05*k
+  skip_threshold=0.5, time_multiplier=0.5, p_correct_boost=-0.05
+
+Meticulous persona:
+  learn_rate=0.12, forget_penalty=0.03, dropout_base=0.01*k
+  skip_threshold=None, time_multiplier=2.0, p_correct_boost=+0.10
+
+Expected finding: 3 personas ≈ 5 personas >> 1 persona.
+If confirmed, this justifies the 3-persona default. [Defense: #2]
+```
+
+### 9.2 Ablation 2: Number of Candidate Paths (K)
+
+```
+K ∈ {3, 5, 8, 10, 15}
+Report: MG, SR, RI vs K, with LLM token cost per K
+Expected: diminishing returns after K=5-8, cost scales linearly
+```
+
+### 9.3 Ablation 3: Selection Strategy
+
+```
+Strategies: {minimax_regret, average, maximin, hurwicz_0.3, hurwicz_0.7,
+             weighted_minimax_regret}
+
+weighted_minimax_regret: Realistic persona gets weight 1.5,
+                         Gritty and Fragile get weight 1.0
+[Defense: #4 — tests whether extra weight on Realistic helps]
+
+Expected: minimax_regret best on RI, average best on MG, maximin too
+conservative. Report full table to let readers judge.
+```
+
+### 9.4 Ablation 4: LLM Backbone
+
+```
+Main experiments: GPT-5.4 AND Claude Sonnet 4.6 (both reported)
+Ablation: compare the two + discuss differences
+
+Report:
+  - Performance metrics (MG, SR, CE, RI) per model
+  - Pool hit rate per model (should be ~100% for both)
+  - Token cost per model
+  - Qualitative: explanation style differences
+
+Note for paper: "Open-source model experiments (Llama, Qwen) are
+planned as future work to further validate reproducibility."
+[Defense: #6]
+```
+
+### 9.5 Ablation 5: Simulation Count (N_sim)
+
+```
+N_sim ∈ {1, 5, 10, 20, 50}
+Report: metric variance vs N_sim
+Expected: variance stabilizes around N_sim=10
+```
+
+### 9.6 Ablation 6: KT Model Quality [Defense: #11]
+
+```
+Compare SimPath performance when using:
+  (a) AKT (high accuracy, ~0.78 AUC) for recommendation
+  (b) DKT (lower accuracy, ~0.73 AUC) for recommendation
+
+Both evaluated with SAINT.
+Expected: SimPath outperforms baselines with BOTH KT models,
+though margins may shrink with lower-quality KT.
+This shows robustness to KT model quality.
+```
+
+---
+
+## 10. Statistical Testing
+
+```
+FOR each (metric, method_pair):
+  differences = [simpath_score[i] - baseline_score[i] for i in students]
+
+  # Normality check
+  _, p_shapiro = shapiro(differences)
+
+  IF p_shapiro > 0.05:
+    stat, p_value = paired_ttest(simpath_scores, baseline_scores)
+    test_name = "paired t-test"
+  ELSE:
+    stat, p_value = wilcoxon(differences)
+    test_name = "Wilcoxon signed-rank"
+
+  # Effect size
+  cohens_d = mean(differences) / std(differences)
+
+  # Bonferroni correction
+  # 6 baselines × 4 metrics = 24 comparisons
+  adjusted_alpha = 0.05 / 24  # ≈ 0.002
+  significant = p_value < adjusted_alpha
+
+  report(metric, method_pair, test_name, p_value, cohens_d, significant)
+
+FOR ablation:
+  Use Kruskal-Wallis + post-hoc Dunn's test with Bonferroni correction
+```
+
+---
+
+## 11. Compute Budget
+
+```
+Per student (K=5, L=8, N_sim=10, 3 personas):
+  Retrieval (Step A):     CPU only, < 0.1s
+  LLM path ordering:     5 calls × ~500 tokens = 2,500 tokens
+  KT simulation:         5 × 3 × 10 = 150 runs, CPU only, < 1s total
+  LLM explanation:       1 call × ~400 tokens = 400 tokens
+  Total LLM:             ~2,900 tokens/student
+  Total latency:         ~5-8 seconds (with parallel LLM calls)
+                         [Defense: #10 — fast enough for session-start batch]
+
+For 1,000 test students:
+  Total LLM tokens:      ~2.9M tokens
+  GPT-5.4 estimated:     ~$3-5 (price depends on actual pricing)
+  Claude Sonnet 4.6:     ~$3-5
+
+Full experiment (main + all ablations, both datasets):
+  Estimated: ~50M tokens total, ~$50-100
+  GPU time: ~8 hours for KT training (AKT + SAINT × 2 datasets)
+  Total wall time: 2-3 days
+```
+
+---
+
+## 12. Reproducibility Checklist
+
+```
+□ Random seeds: {42, 123, 456, 789, 1024} for 5-run average
+□ KT models: save checkpoints, report validation AUC
+□ LLM calls: log ALL prompts, responses, model version, params
+□ Model versions: exact strings (e.g., "gpt-5.4-2026-03-05",
+    "claude-sonnet-4-6")
+□ Persona params: θ_grit and θ_frag fixed (reported in paper),
+    θ_real varies per student (extraction code provided)
+□ Simulation seeds: deterministic via hash(student_id, path_idx,
+    persona_idx, sim_idx)
+□ Statistical tests: report exact p-values, effect sizes, correction
+□ Code: GitHub repo with all code, configs, prompts, sample data
+□ Data: EdNet (CC BY-NC 4.0), ASSISTments (public)
+□ Persona validation clustering: code + results included
+□ Baseline reimplementations: code included, author contact logged
+```
+
+---
+
+## 13. Paper Structure & Page Budget (Springer LNAI, 16 pages)
+
+```
+Section 1: Introduction (2 pages)
+  - Problem: one-size-fits-all recommendations ignore student variability
+  - Key insight: personas = session states, not fixed types [Defense: #4]
+  - Contribution: simulation-in-the-loop + minimax regret
+  - Differentiation from Agent4Edu in paragraph 3 [Defense: #7]
+
+Section 2: Related Work (2 pages)
+  - 2.1 Learning Path Recommendation (LPReKL, GenMentor, RL-DKT)
+  - 2.2 Student Simulation (Agent4Edu, EduAgent, SimClass)
+  - 2.3 Robust Decision-Making (minimax regret, portfolio theory)
+  - Table comparing Agent4Edu vs SimPath [Defense: #7]
+
+Section 3: SimPath Framework (4 pages)
+  - 3.1 Overview (architecture diagram)
+  - 3.2 Retrieve-Then-Order Path Generation [Defense: #5]
+  - 3.3 Persona Simulator Design (with theoretical grounding) [Defense: #2]
+  - 3.4 Minimax Regret Selection (formulas + worked example)
+  - 3.5 Explanation Generation
+
+Section 4: Experiments (4 pages)
+  - 4.1 Datasets & Setup
+  - 4.2 Persona Validation via Clustering (Figure) [Defense: #2]
+  - 4.3 Main Results (2 datasets × 6 baselines × 4 metrics)
+  - 4.4 Ground Truth Correlation [Defense: #1]
+  - 4.5 Ablation Studies (selection strategy, # personas, K, LLM, KT quality)
+  - 4.6 Expert Preference Study results
+
+Section 5: Analysis & Discussion (2.5 pages)
+  - 5.1 Case Study: 2-3 student simulation trajectories visualized
+  - 5.2 When does robustness matter most? (analysis by student type)
+  - 5.3 Domain-specific insights (EdNet vs ASSISTments) [Defense: #9]
+  - 5.4 Limitations:
+      - Offline evaluation, no online A/B test [Defense: #3]
+      - Single-session scope [Defense: #12]
+      - KT model dependency (shared limitation) [Defense: #11]
+      - Compute latency for real-time use [Defense: #10]
+
+Section 6: Conclusion (0.5 pages)
+
+Appendix (if space / supplementary):
+  - Full prompt templates
+  - Persona parameter sensitivity analysis
+  - Per-KC breakdown of results
+  - All LLM call logs (sample)
+```
+
+---
+
+## 14. RecSys Reframing (if submitting to RecSys 2026)
+
+```
+Title adjustment:
+  "SimPath: Robust Learning Resource Recommendation via
+   Multi-Persona Simulation Testing"
+
+Framing changes:
+  - Emphasize "multi-stakeholder recommendation" angle
+  - Frame personas as "user segments with uncertain membership"
+  - Minimax regret → "robust recommendation under user uncertainty"
+  - Connect to RecSys 2025 Best Paper on "unwanted recommendations"
+    (Conformal Risk Control)
+  - Emphasize the GENERAL paradigm: simulate-then-select is applicable
+    to any recommendation domain where user behavior varies
+
+Additional baseline for RecSys:
+  - Standard collaborative filtering + popularity as extra baseline
+  - Emphasize that educational domain has MEASURABLE ground truth
+    (test scores) unlike movie/music recommendations
+```
