@@ -1,0 +1,270 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage{kotex}
+\usepackage{booktabs}
+\usepackage{amsmath,amssymb}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage{multirow}
+\usepackage{xcolor}
+\usepackage{graphicx}
+\usepackage{geometry}
+\usepackage{enumitem}
+\geometry{margin=2.5cm}
+
+\newcommand{\ours}{\textsc{EvoLearning}}
+\newcommand{\ep}{\mathrm{EP}}
+\newcommand{\kes}{\mathrm{KES}}
+\newcommand{\dkt}{\mathrm{DKT}}
+\newcommand{\bc}{\mathrm{BC}}
+\newcommand{\ppo}{\mathrm{PPO}}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\E}{\mathbb{E}}
+
+\title{\textbf{EvoLearning: 개인화 학습 경로 추천을 위한\\진화적 전문가 안내 강화학습}}
+\author{Anonymous}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+시뮬레이터 기반 순차 추천에서, 학습된 사용자 모델은 다단계 추천 시퀀스의 오프라인 정책 최적화를 가능하게 한다. 학습 경로 추천(LPR)은 학습자의 숙달도를 극대화하기 위해 지식 개념의 순서를 추천하는 문제로, 추천의 \emph{순서}가 결과를 결정적으로 좌우하는 대표적 사례이다. 그러나 강화학습(RL) 기반 LPR 접근법은 \emph{탐색 공간 폭발} 문제에 직면한다: 가능한 경로의 수는 시퀀스 길이에 따라 조합적으로 증가하여, $L=20$인 일반적인 교육과정에서 $10^{38}$에 달하며, 보상은 시퀀스 끝에서만 희소하게 제공된다. 본 논문에서는 \emph{진화적 사전 탐색}을 통해 이 문제를 해결하는 3단계 프레임워크 \ours{}를 제안한다. 첫째, 다양성 정규화 선택을 적용한 진화 알고리즘이 학습자별 고품질 전문가 경로를 합성한다. 둘째, 행동 복제(BC)가 이러한 개별 해를 일반화 가능한 정책으로 압축한다. 셋째, 근접 정책 최적화(PPO)가 온라인 상호작용을 통해 진화적 한계를 넘어서는 개선을 달성한다. 2개의 실세계 데이터셋과 10개의 베이스라인에 대한 실험에서 최첨단 성능과 vanilla PPO 대비 최대 $7\times$ 빠른 수렴을 달성하였다.
+\end{abstract}
+
+\textbf{키워드:} 순차 추천, 학습 경로 추천, 강화학습, 진화 알고리즘, 행동 복제, 시뮬레이터 기반 추천
+
+%% ============================================================
+\section{서론}
+%% ============================================================
+
+순차 추천---사용자의 이력을 바탕으로 다음에 상호작용할 아이템을 예측하는 문제---은 추천 시스템의 핵심 과제이다~\cite{hidasi2016gru4rec}. 학습 경로 추천(LPR)은 이 패러다임의 특히 도전적인 사례로, 추천되는 지식 개념(KC)의 시퀀스가 \emph{공동으로} 최적화되어야 한다: 영화나 상품 추천에서 각 아이템이 독립적인 효용을 가지는 것과 달리, 교육에서는 개념의 \emph{순서}가 선수 관계, 지식 전이, 인지 부하로 인해 학습 결과를 결정적으로 좌우한다~\cite{liu2019cseal,li2023gehrl,cheng2025knowlp}. 이는 LPR을 \emph{시뮬레이터 기반 순차 추천} 문제로 만들며, 학습된 학생 모델이 추천 전략 평가를 위한 환경으로 사용된다.
+
+최근 연구들은 LPR을 지식 진화 시뮬레이터(KES)---일반적으로 학습자의 숙달도가 개념 연습에 따라 어떻게 변화하는지 예측하는 심층 지식 추적(DKT) 모델~\cite{piech2015dkt}---내에서의 강화학습 문제로 정식화한다~\cite{liu2019cseal}. CSEAL~\cite{liu2019cseal}, SRC~\cite{wang2023src}, GEHRL~\cite{li2023gehrl}, DLELP/KnowLP~\cite{cheng2025knowlp} 등의 방법이 이 패러다임의 유효성을 입증하였다.
+
+그러나 기존 RL 기반 LPR 방법들은 간과된 치명적 가정을 내포하고 있다: \textbf{추론 시에 시뮬레이터 접근을 필요로 한다}는 것이다. 경로 생성 과정에서 CSEAL~\cite{liu2019cseal}이나 GEHRL~\cite{li2023gehrl} 같은 방법들은 추천된 각 개념을 KES에 피드백하여 업데이트된 숙달도 $\mathbf{h}_t$를 얻고, 이를 다음 개념 선택에 사용한다. 이는 실제 배포 환경에서 근본적으로 성립하지 않는다: 튜터링 시스템이 학습 경로를 추천할 때, 학생은 아직 추천된 어떤 개념도 연습하지 않은 상태이다. 시뮬레이터가 예측하는 $\mathbf{h}_t$---숙달도가 \emph{어떻게 변할 것인지}---는 추천 시점에 존재하지 않는 특권 정보이다. Li 등~\cite{li2024privileged}이 공식적으로 확립한 바와 같이, 이 특권 상태에 의존하는 것은 \emph{시험을 먼저 보고 공부 계획을 세우는 것}과 같다---시스템이 아직 발생하지 않은 학습 활동의 결과를 ``알고 있는'' 셈이다. \emph{학습} 중에 시뮬레이터에 접근하는 것은 정당하지만(에이전트가 시뮬레이션된 상호작용으로부터 학습하는 것은 학생이 연습으로부터 배우는 것과 같다), \emph{추론} 시에 사용하는 것은 학습 환경과 배포 환경을 혼동하여 시뮬레이터 없이는 작동할 수 없는 정책을 생산한다.
+
+이 시뮬레이터 의존성을 제거하면---정책이 초기 숙달도 $\mathbf{h}_0$만으로 계획해야 하면---문제가 극적으로 어려워진다. 정책은 \emph{어떤 중간 피드백도 없이 $L$개 개념의 전체 경로를 확정}해야 하며, 이는 \textbf{블라인드 플래닝}의 한 형태이다. 탐색 공간은 $\binom{M}{L} \cdot L!$로 증가하여---$M=123$, $L=20$에서 $10^{30}$을 초과하고---보상은 전체 경로가 실행된 후에야 도착하는 \emph{희소} 신호이다. 중간 숙달도 신호 없이 탐색을 안내할 수 없으므로, 무작위 초기화된 RL 정책은 이 조합적 블라인드 탐색에 압도된다.
+
+더불어, 학습 경로에 대한 전문가 시연은 \emph{데이터에 자연적으로 존재하지 않는다}. 학생 로그는 학습자가 \emph{실제로 한 것}을 기록하지, \emph{해야 할 것}을 기록하지 않는다. 최적 시연을 수집하려면 각 개별 학습자에 대해 전문 튜터와의 통제된 실험이 필요한데---이는 대규모로 명백히 불가능하다.
+
+본 논문에서는 블라인드 플래닝과 시연 갭이라는 두 가지 과제를 \emph{진화적 사전 탐색}을 통해 해결하는 프레임워크 \ours{}를 제안한다. KES는 추론에서는 금지되지만 학습 중에는 사용 가능하다. 이 비대칭성을 활용한다: 진화 알고리즘이 KES 내에서 \emph{개별 학습자}별로 고품질 경로를 탐색하여, 데이터에서 찾을 수 없는 전문가 시연을 합성한다. 이 시연들은 $\mathbf{h}_0$만으로 계획하는 시뮬레이터 프리 정책으로 증류되고, 비대칭 액터-크리틱 PPO를 통해 정제된다.
+
+\begin{enumerate}
+    \item \textbf{진화적 전문가 생성.} 각 학습 대상 학습자에 대해, 진화 알고리즘이 KES 내에서 경로 공간을 효율적으로 탐색한다. 행렬식 점 과정(DPP)~\cite{kulesza2012dpp}에 영감을 받은 다양성 정규화 탐욕 선택이 학습자당 $K$개의 다양한 전문가 경로를 산출하여, 효과적인 전략의 넓은 커버리지를 보장한다.
+
+    \item \textbf{행동 복제 웜 스타트.} 전문가 경로가 지도 학습을 통해 신경망 정책으로 증류된다. 이는 개별 인스턴스의 진화적 지식을 학습자 상태에서 개념 추천으로의 \emph{일반화 가능한} 매핑으로 압축하여, 탐색 공간을 $\binom{M}{L}$에서 시연된 전략의 이웃으로 효과적으로 축소한다.
+
+    \item \textbf{PPO 파인튜닝.} BC로 초기화된 정책에서 출발하여, PPO가 KES와의 온라인 상호작용을 통해 전략을 개선한다. 정책이 이미 고보상 영역에서 작동하므로, PPO의 탐색은 전역 무작위 탐색이 아닌 국소 개선 방향으로 진행된다.
+\end{enumerate}
+
+본 논문의 주요 기여는 다음과 같다:
+\begin{itemize}
+    \item 교육 추천에서의 시연 갭을 진화 탐색을 통한 전문가 경로 자동 합성으로 해결하고, BC$\to$PPO 파인튜닝을 통해 일반화 가능한 정책으로 증류하는 프레임워크 \ours{}를 도입한다.
+    \item 진화 경로에서의 모드 붕괴를 방지하고 다양한 학습자 상태에 대한 BC 커버리지를 향상시키는 다양성 정규화 전문가 선택 메커니즘을 제안한다.
+    \item 2개 데이터셋에서 경로 길이 $L \in \{5, 10, 20\}$에 대해 10개 방법을 비교하는 포괄적 실험을 수행하여, 최첨단 성능과 최대 $7\times$ 빠른 수렴을 달성한다.
+    \item 저비용 시뮬레이터, 조합적 행동 공간, 인스턴스별 이질성이라는 세 가지 조건 하에서 진화적 사전 탐색이 효과적임을 규명하여, 헬스케어 및 금융 등의 도메인으로의 확장 가능성을 제시한다.
+\end{itemize}
+
+%% ============================================================
+\section{관련 연구}
+%% ============================================================
+
+\subsection{지식 추적}
+
+지식 추적(KT) 모델은 상호작용 시퀀스로부터 학습자의 시간에 따른 숙달도 변화를 추정한다. Deep Knowledge Tracing(DKT)~\cite{piech2015dkt}이 이 과제에 순환 신경망의 사용을 개척하였으며, DKVMN~\cite{zhang2017dkvmn}, SAKT~\cite{pandey2019sakt}, AKT~\cite{ghosh2020akt}, SAINT~\cite{choi2020saint} 등의 후속 모델이 어텐션 메커니즘과 메모리 네트워크를 활용하여 정확도를 향상시켰다. LPR에서 KT 모델은 RL 학습을 위한 지식 진화 시뮬레이터(KES)와 추론 시 숙달도 추정기라는 이중 역할을 수행한다.
+
+\subsection{학습 경로 추천}
+
+초기 LPR 방법들은 선수 과목 정렬~\cite{chen2018prerequisite}이나 난이도 매칭~\cite{liu2019cseal} 같은 휴리스틱 규칙에 의존하였다. CSEAL 프레임워크~\cite{liu2019cseal}는 KES 패러다임을 도입하여, 인지적 내비게이션---그래프 관련 개념으로 행동 공간을 제한---을 적용한 액터-크리틱 방법으로 DKT 시뮬레이터 내에서 RL 에이전트를 학습시켰다. SRC~\cite{wang2023src}는 LPR을 개념 인식 랭킹이 포함된 집합-시퀀스 문제로 정식화하였다. GEHRL~\cite{li2023gehrl}은 목표 계획 에이전트와 목표 달성 에이전트를 갖춘 계층적 RL을 제안하였다. DLELP와 KnowLP~\cite{cheng2025knowlp}는 선수 관계 및 유사성 에이전트를 갖춘 다중 에이전트 시스템을 사용하며, EDU-GraphRAG를 통한 지식 그래프 구성을 활용한다. GRU4Rec~\cite{hidasi2016gru4rec}는 원래 세션 기반 추천을 위해 설계되었으나, 순차적 학습 경로 생성에 적용되었다.
+
+\subsection{진화 알고리즘과 강화학습}
+
+RL을 시연으로 초기화하는 패러다임은 로보틱스에서 연구되었으나~\cite{rajeswaran2018dexterous,nair2018demonstrations}, 이러한 연구들은 \emph{사전에 존재하는} 인간 시연에 의존한다. 교육에서는 전문가 학습 경로가 데이터에 존재하지 않으므로, 자동 시연 생성이 필요하다.
+
+진화 알고리즘(EA)은 이 역할에 대해 여러 구조적 이점을 제공한다. 첫째, EA는 \emph{희소 보상}에 자연적으로 강건하다---정보적 기울기 신호를 필요로 하는 RL 정책 기울기와 달리, EA는 완전한 해를 종단 간 평가하고 적합도만으로 선택한다. Salimans 등~\cite{salimans2017es}이 관찰한 바와 같이, ``ES는 희소 보상 환경에서 어려움을 겪지 않으며,'' 반면 무작위로 초기화된 RL 정책은 ``종종 오랜 시간 제자리에서 무작위 떨림으로 나타난다.'' 둘째, 개체 간 적합도 평가가 독립적이므로 직접적인 GPU 병렬화가 가능하다~\cite{wang2026gpuea}: 우리 설정에서 후보 경로 하나를 평가하는 데는 $L$번의 DKT 순전파만 필요하며, 60개 경로의 전체 집단을 단일 GPU에서 밀리초 단위로 배치 평가할 수 있다. 셋째, EA의 변이-선택 메커니즘은 근사 오류로 인해 갇히기 쉬운 경사 하강법보다 국소 최적값에 대해 더 강건하다~\cite{sigaud2023evorl}.
+
+그러나 EA만으로는 배포에 불충분하다. 학습자별 고정된 후보 집합 $\mathcal{C}$ 내에서만 탐색하며---결정적으로---적합도 평가를 위해 시뮬레이터가 필요하다. 실제 튜터링 시스템에서 학생에게 ``3,000가지 다른 공부 계획을 시도해봐''라고 요청할 수는 없다. 따라서 EA는 KES가 저비용 평가를 제공하는 \emph{학습 단계}에 한정된다. 이것이 행동 복제의 필요성을 동기 부여한다: BC는 개별 인스턴스의 진화적 해를 시뮬레이터 접근 없이 단일 순전파로 미지의 학습자를 처리하는 \emph{일반화 가능한 신경망 정책}으로 압축한다.
+
+더 넓은 EvoRL 문헌~\cite{li2024evorl}은 EA와 RL의 결합이 샘플 효율성과 탐색 능력을 향상시킴을 보여주었다. ERL~\cite{khadka2018erl} 같은 하이브리드 방법은 기울기 학습된 액터와 함께 집단을 공동 진화시키고, 집단 기반 학습~\cite{jaderberg2017pbt}은 하이퍼파라미터를 온라인으로 진화시킨다. 우리의 접근법은 구조적으로 다르다: 진화는 \emph{해 수준}(개별 학습자의 경로 찾기)에서 작동하고, 기울기 기반 학습은 \emph{정책 수준}(학습자 간 일반화)에서 작동한다. 이 분리는 각 구성요소가 자연스러운 영역에서 작동하도록 한다---조합적 개별 인스턴스 탐색을 위한 EA, 교차 인스턴스 일반화를 위한 신경망.
+
+%% ============================================================
+\section{사전 지식}
+%% ============================================================
+
+\subsection{문제 정의}
+
+$\mathcal{K} = \{k_1, k_2, \ldots, k_M\}$을 교육과정의 $M$개 지식 개념 집합이라 하자. 학습자는 상호작용 이력 $\mathcal{H} = \{(c_1, r_1), (c_2, r_2), \ldots\}$로 특성화되며, 여기서 $c_t \in \mathcal{K}$는 연습한 개념이고 $r_t \in \{0, 1\}$은 시점 $t$에서의 이진 정오답 결과이다.
+
+\begin{quote}
+\textbf{정의} (학습 경로 추천). 학습자의 이력 $\mathcal{H}$, 목표 개념 집합 $\mathcal{G} \subseteq \mathcal{K}$, 경로 길이 $L$이 주어질 때, 목표 $\mathcal{G}$에 대한 학습자의 숙달도 향상을 최대화하는 정렬된 시퀀스 $\mathbf{p} = (p_1, p_2, \ldots, p_L) \in \mathcal{K}^L$을 찾는 것이 목표이다.
+\end{quote}
+
+\subsection{지식 진화 시뮬레이터 (KES)}
+
+CSEAL 프레임워크~\cite{liu2019cseal}를 따라, 학습된 DKT 모델~\cite{piech2015dkt}을 KES로 사용한다. 이력 $\mathcal{H}$가 주어지면, DKT는 숙달도 벡터 $\mathbf{h} \in [0,1]^M$을 생성하며, $h_i$는 개념 $k_i$를 정확히 답할 추정 확률을 나타낸다.
+
+KES는 결정론적 응답 모델로 작동한다: 학습자가 개념 $c$를 연습할 때, 결과는 다음에 의해 결정된다.
+\begin{equation}
+    r = \mathbf{1}[h_c > 0.5]
+\end{equation}
+
+\subsection{효과성 백분율 (EP)}
+
+LPR의 표준 평가 지표는 효과성 백분율~\cite{liu2019cseal}로, 학습 경로 실행 후 목표 개념에 대한 정규화된 숙달도 향상을 측정한다:
+\begin{equation}
+    \ep = \frac{1}{|\mathcal{G}'|} \sum_{g \in \mathcal{G}'} \frac{E_g^{\text{end}} - E_g^{\text{start}}}{1 - E_g^{\text{start}}}
+\end{equation}
+여기서 $\mathcal{G}' = \{g \in \mathcal{G} : 1 - E_g^{\text{start}} > 0.01\}$은 거의 숙달된 목표를 제외한다.
+
+%% ============================================================
+\section{방법론: \ours{}}
+%% ============================================================
+
+\ours{}는 세 단계로 구성된다.
+
+\subsection{1단계: 진화적 전문가 생성}
+
+각 학습 대상 학습자의 이력 $\mathcal{H}$, 목표 $\mathcal{G}$, 초기 숙달도 $\mathbf{h}_0$에 대해 진화 알고리즘으로 고품질 학습 경로를 탐색한다.
+
+\paragraph{후보 공간.} 목표 개념, 선수 및 유사 개념, 근접 발달 영역(ZPD) 개념을 결합하여 최대 $C$개의 후보 집합 $\mathcal{C}$를 구성한다:
+\begin{equation}
+    \mathcal{C} = \mathcal{G} \cup \bigcup_{g \in \mathcal{G}} \left(\text{prereq}(g) \cup \text{sim}_K(g)\right) \cup \text{ZPD}
+\end{equation}
+
+\paragraph{진화 탐색.} $N_{\text{pop}}$개의 후보 경로 집단을 유지하며, $N_{\text{gen}}$ 세대에 걸쳐 토너먼트 선택, 순서 교차, 점 돌연변이를 통해 진화시킨다.
+
+\paragraph{다양성 정규화 전문가 선택.} 전문가 집합의 모드 붕괴를 방지하기 위해 탐욕적 DPP 영감 절차로 학습자당 $K$개의 다양한 경로를 선택한다:
+\begin{equation}
+    \text{score}(\mathbf{p}) = f(\mathbf{p}) - \lambda \cdot \max_{\mathbf{p}' \in \mathcal{S}} \text{sim}(\mathbf{p}, \mathbf{p}')
+\end{equation}
+
+\subsection{2단계: 행동 복제}
+
+시뮬레이터 프리 액터 설계와 일관되게, BC 상태는 \emph{초기} 숙달도 $\mathbf{h}_0$를 사용한다. 각 전문가 경로에 대해 $L$개의 학습 예제를 구성한다:
+\begin{equation}
+    \{(\mathbf{s}_t, a_t)\}_{t=0}^{L-1}, \quad \mathbf{s}_t = [\mathbf{h}_0 \| \mathbf{g} \| t/L]
+\end{equation}
+스텝 인덱스와 사용된 개념 배제 마스크만이 스텝을 구별하는 신호이다---액터는 초기 지식 상태만으로 전체 경로를 계획하는 것을 학습한다.
+
+정책 $\pi_\theta$는 교차 엔트로피 손실을 최소화하여 학습된다:
+\begin{equation}
+    \mathcal{L}_{\bc} = -\frac{1}{|\mathcal{D}|} \sum_{(\mathbf{s}, a) \in \mathcal{D}} \log \pi_\theta(a \mid \mathbf{s})
+\end{equation}
+
+\subsection{3단계: 비대칭 액터-크리틱 PPO 파인튜닝}
+
+KES 기반 LPR에서의 핵심 설계 고려사항은 정책이 추론 시 시뮬레이터에 접근할 수 있는지 여부이다. Li 등~\cite{li2024privileged}이 지적한 바와 같이, 시뮬레이터의 내부 지식 상태는 실제 배포에서 이용 불가능하다. 추론 시 단계별 시뮬레이터 피드백에 의존하는 것은 시험 답안을 이미 알고 있는 상태에서 공부 계획을 세우는 것과 같다.
+
+이를 \emph{비대칭 액터-크리틱} 아키텍처로 해결한다. \textbf{액터}(정책)는 매 스텝 \emph{초기} 숙달도 $\mathbf{h}_0$만을 수신하여 KES 프리 추론을 보장한다:
+\begin{equation}
+    \mathbf{s}_t^{\text{actor}} = [\mathbf{h}_0 \| \mathbf{g} \| t/L], \quad a_t \in \mathcal{K} \setminus \{a_0, \ldots, a_{t-1}\}
+\end{equation}
+
+학습 중에만 사용되는 \textbf{크리틱}(가치 함수)은 KES로부터 \emph{특권적} 진화 숙달도 $\mathbf{h}_t$를 수신한다:
+\begin{equation}
+    \mathbf{s}_t^{\text{critic}} = [\mathbf{h}_t \| \mathbf{g} \| t/L]
+\end{equation}
+이 비대칭성은 크리틱이 더 정확한 이점 추정을 제공하도록 하면서, 액터는 이 특권 정보 없이 계획하는 것을 학습한다. 배포된 정책은 완전히 \emph{시뮬레이터 프리}이다.
+
+PPO 클리핑된 대리 목적함수:
+\begin{equation}
+    \mathcal{L}_{\ppo} = -\E_t\left[\min\left(\rho_t \hat{A}_t,\ \text{clip}(\rho_t, 1\pm\epsilon) \hat{A}_t\right)\right]
+\end{equation}
+
+%% ============================================================
+\section{실험}
+%% ============================================================
+
+\subsection{데이터셋}
+
+\begin{itemize}
+    \item \textbf{ASSISTments 2009}~\cite{feng2009assistments}: 온라인 수학 튜터링 플랫폼. 전처리 후 2,303명의 학습자, 123개 지식 개념, 338K 상호작용.
+    \item \textbf{Junyi Academy}~\cite{chang2015junyi}: 중국 수학 학습 플랫폼. 시드 제어로 10,000명 샘플링, 39개 지식 개념, 240만 상호작용.
+\end{itemize}
+
+CSEAL 프로토콜~\cite{liu2019cseal}에 따라 각 데이터셋을 50/50으로 $\mathcal{D}_{\text{Sim}}$(DKT 학습)과 $\mathcal{D}_{\text{Off}}$(RL 학습 및 평가)로 분할한다. $\mathcal{D}_{\text{Off}}$는 80/10/10으로 학습, 검증, 테스트 세트로 추가 분할된다.
+
+\subsection{베이스라인}
+
+5개 범주에 걸친 9개 방법과 비교한다:
+\begin{itemize}
+    \item \textbf{휴리스틱:} Random, Target-repeat, Rule-based
+    \item \textbf{순차:} GRU4Rec~\cite{hidasi2016gru4rec}
+    \item \textbf{강화학습:} PPO-vanilla~\cite{schulman2017ppo}
+    \item \textbf{그래프 강화 RL:} CSEAL~\cite{liu2019cseal}, GEHRL~\cite{li2023gehrl}, DLELP~\cite{cheng2025knowlp}
+    \item \textbf{LLM 강화:} KnowLP~\cite{cheng2025knowlp}
+\end{itemize}
+
+모든 베이스라인은 공정한 비교를 위해 동일한 실험 조건(같은 DKT 모델, 데이터 분할, 평가 프로토콜) 하에서 재구현되었다.
+
+%% ============================================================
+\section{분석}
+%% ============================================================
+
+\subsection{탐색 공간 축소와 BC 초기화}
+
+\ours{}의 핵심 설계 원리는 \emph{점진적 탐색 공간 축소}이다. $M=123$ 개념에 대한 경로 공간:
+
+\begin{center}
+\begin{tabular}{@{}lrl@{}}
+\toprule
+$L$ & $\binom{M}{L} \cdot L!$ & 규모 \\
+\midrule
+5 & $2.5 \times 10^{10}$ & $10^{10}$ \\
+10 & $2.3 \times 10^{20}$ & $10^{20}$ \\
+20 & $4.7 \times 10^{38}$ & $10^{38}$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\ours{}는 세 단계의 압축을 통해 이를 해결한다: (1)~후보 집합 $\mathcal{C}$가 그래프 구조를 활용하여 스텝당 행동 공간을 $M$에서 $C \ll M$으로 축소; (2)~진화가 이 축소된 공간 내에서 고품질 경로를 탐색; (3)~BC가 $K \times N_{\text{train}}$개의 전문가 경로를 미지의 학습자에게 일반화하는 신경망 정책으로 압축. 결과적으로 PPO는 지수적 경로 공간의 \emph{다항식 크기 부분집합}에 지지가 집중된 정책에서 시작한다.
+
+\subsection{교육을 넘어선 일반화 가능성}
+
+진화적 사전 탐색 패러다임은 교육에 특화되지 않는다. \emph{시뮬레이터 증강 순차 추천}에서 효과적인 세 가지 조건을 규명한다:
+\begin{enumerate}
+    \item \textbf{저비용 시뮬레이터.} 학습된 사용자 모델이 제로 비용 경로 평가를 가능하게 하여, 인스턴스별 진화 탐색이 실현 가능하다.
+    \item \textbf{조합적 시퀀스 공간.} 추천 시퀀스가 충분히 길어($L \geq 5$) 전수 또는 무작위 탐색이 실패한다.
+    \item \textbf{사용자별 이질성.} 최적 시퀀스가 사용자마다 다르며, 단일 전역 전문가 정책이 아닌 개인화된 시연이 필요하다.
+\end{enumerate}
+
+%% ============================================================
+\section{결론}
+%% ============================================================
+
+본 논문에서는 진화적 사전 탐색을 통해 전문가 시연 갭을 해결하는 학습 경로 추천 프레임워크 \ours{}를 제시하였다. 학습자별 다양하고 고품질인 경로를 합성하고 BC$\to$PPO를 통해 신경망 정책으로 증류함으로써, \ours{}는 효과적인 탐색 공간을 조합적에서 다루기 쉬운 수준으로 축소하여, 유의미하게 빠른 수렴과 함께 최첨단 성능을 달성한다. 기저 패러다임---시뮬레이터 기반 순차 추천을 위한 진화적 시연 생성---은 인간 전문가 감독 없이 사용자별 최적 시퀀스를 발견해야 하는 헬스케어, 금융 및 기타 도메인으로 자연스럽게 확장된다.
+
+%% ============================================================
+\bibliographystyle{plain}
+\begin{thebibliography}{32}
+
+\bibitem{piech2015dkt} C. Piech et al., ``Deep knowledge tracing,'' NeurIPS, 2015.
+\bibitem{liu2019cseal} Q. Liu et al., ``Exploiting cognitive structure for adaptive learning,'' KDD, 2019.
+\bibitem{li2023gehrl} Q. Li et al., ``Graph enhanced hierarchical reinforcement learning for goal-oriented learning path recommendation,'' CIKM, 2023.
+\bibitem{cheng2025knowlp} X. Cheng et al., ``Education-oriented graph retrieval-augmented generation for learning path recommendation,'' arXiv:2506.22303, 2025.
+\bibitem{wang2023src} Y. Wang et al., ``Set-to-sequence ranking-based concept-aware learning path recommendation,'' AAAI, 2023.
+\bibitem{schulman2017ppo} J. Schulman et al., ``Proximal policy optimization algorithms,'' arXiv:1707.06347, 2017.
+\bibitem{hidasi2016gru4rec} B. Hidasi et al., ``Session-based recommendations with recurrent neural networks,'' ICLR, 2016.
+\bibitem{zhang2017dkvmn} J. Zhang et al., ``Dynamic key-value memory networks for knowledge tracing,'' WWW, 2017.
+\bibitem{pandey2019sakt} S. Pandey and G. Karypis, ``A self-attentive model for knowledge tracing,'' EDM, 2019.
+\bibitem{ghosh2020akt} A. Ghosh et al., ``Context-aware attentive knowledge tracing,'' KDD, 2020.
+\bibitem{choi2020saint} Y. Choi et al., ``Towards an appropriate query, key, and value computation for knowledge tracing,'' L@S, 2020.
+\bibitem{feng2009assistments} M. Feng et al., ``Addressing the assessment challenge with an online system,'' UMUAI, 2009.
+\bibitem{chang2015junyi} H.-S. Chang et al., ``Modeling exercise relationships in e-learning,'' EDM, 2015.
+\bibitem{chen2018prerequisite} Y. Chen et al., ``Prerequisite-driven deep knowledge tracing,'' ICDM, 2018.
+\bibitem{ross2011dagger} S. Ross et al., ``A reduction of imitation learning to no-regret online learning,'' AISTATS, 2011.
+\bibitem{rajeswaran2018dexterous} A. Rajeswaran et al., ``Learning complex dexterous manipulation with deep RL and demonstrations,'' RSS, 2018.
+\bibitem{nair2018demonstrations} A. Nair et al., ``Overcoming exploration in RL with demonstrations,'' ICRA, 2018.
+\bibitem{kulesza2012dpp} A. Kulesza and B. Taskar, ``Determinantal point processes for machine learning,'' FTML, 2012.
+\bibitem{salimans2017es} T. Salimans et al., ``Evolution strategies as a scalable alternative to RL,'' arXiv:1703.03864, 2017.
+\bibitem{khadka2018erl} S. Khadka and K. Tumer, ``Evolution-guided policy gradient in RL,'' NeurIPS, 2018.
+\bibitem{jaderberg2017pbt} M. Jaderberg et al., ``Population based training of neural networks,'' arXiv:1711.09846, 2017.
+\bibitem{wang2026gpuea} S. Wang et al., ``Scaling behaviors of evolutionary algorithms on GPUs,'' arXiv:2601.18446, 2026.
+\bibitem{li2024evorl} P. Li et al., ``Evolutionary reinforcement learning: A survey,'' IEEE TEVC, 2024.
+\bibitem{sigaud2023evorl} O. Sigaud, ``Combining evolution and deep RL for policy search: A survey,'' ACM TELO, 2023.
+\bibitem{li2024privileged} Q. Li et al., ``Privileged knowledge state distillation for RL-based educational path recommendation,'' KDD, 2024.
+
+\end{thebibliography}
+
+\end{document}
