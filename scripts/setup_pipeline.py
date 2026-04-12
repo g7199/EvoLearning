@@ -26,7 +26,7 @@ import torch
 
 def setup_assist09(gpu):
     """Full pipeline for ASSIST09 dataset."""
-    device = f'cuda:{gpu}'
+    device = gpu if gpu == 'cpu' else f'cuda:{gpu}'
     print(f"\n{'='*60}")
     print(f"  ASSIST09 Setup Pipeline (GPU:{gpu})")
     print(f"{'='*60}")
@@ -97,7 +97,7 @@ def setup_assist09(gpu):
 
 def setup_junyi(gpu):
     """Full pipeline for Junyi dataset."""
-    device = f'cuda:{gpu}'
+    device = gpu if gpu == 'cpu' else f'cuda:{gpu}'
     print(f"\n{'='*60}")
     print(f"  Junyi Setup Pipeline (GPU:{gpu})")
     print(f"{'='*60}")
