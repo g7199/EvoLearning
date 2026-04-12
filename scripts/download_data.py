@@ -26,7 +26,7 @@ def download_file(url, dest, desc=""):
 
 
 def download_assist09():
-    """Download ASSIST09 dataset."""
+    """Download ASSIST09 dataset from Google Drive via gdown."""
     print(f"\n{'='*50}")
     print(f"  ASSIST09 Dataset")
     print(f"{'='*50}")
@@ -38,19 +38,28 @@ def download_assist09():
         print(f"  Already exists: {dest_file}")
         return True
 
-    # ASSISTments 2009-2010 data
-    # Source: https://sites.google.com/site/assistmentsdata/home/assistment-2009-2010-data
-    url = "https://drive.google.com/uc?export=download&id=1NNXHFRxcAVURFRacMHoNEZPMxgbLpMnS"
+    os.makedirs(dest_dir, exist_ok=True)
 
-    print(f"\n  ASSIST09 requires manual download:")
+    try:
+        import gdown
+        # ASSISTments 2009-2010 skill_builder_data_corrected.csv
+        file_id = "1NNXHFRxcAVURFRacMHoNEZPMxgbLpMnS"
+        url = f"https://drive.google.com/uc?id={file_id}"
+        print(f"  Downloading from Google Drive...")
+        gdown.download(url, dest_file, quiet=False)
+
+        if os.path.exists(dest_file):
+            print(f"  Saved: {dest_file} ({os.path.getsize(dest_file) / 1e6:.1f} MB)")
+            return True
+        else:
+            print(f"  Download failed. Try manual download:")
+    except ImportError:
+        print(f"  gdown not installed. Run: pip install gdown")
+        print(f"  Or manual download:")
+
     print(f"  1. Go to: https://sites.google.com/site/assistmentsdata/home/assistment-2009-2010-data")
     print(f"  2. Download 'skill_builder_data_corrected.csv'")
     print(f"  3. Place it in: {dest_dir}/")
-    print(f"\n  Or if you have the file elsewhere:")
-    print(f"    mkdir -p {dest_dir}")
-    print(f"    cp /path/to/skill_builder_data_corrected.csv {dest_dir}/")
-
-    os.makedirs(dest_dir, exist_ok=True)
     return False
 
 
@@ -67,15 +76,22 @@ def download_junyi():
         print(f"  Already exists: {dest_file}")
         return True
 
-    print(f"\n  Junyi requires manual download:")
-    print(f"  1. Go to: https://pslcdatashop.web.cmu.edu/DatasetInfo?datasetId=1198")
-    print(f"  2. Request access and download the dataset")
-    print(f"  3. Extract and place files in: {dest_dir}/")
-    print(f"     Required files:")
-    print(f"       - junyi_ProblemLog_original.csv")
-    print(f"       - junyi_Exercise_table.csv")
-
     os.makedirs(dest_dir, exist_ok=True)
+
+    # Try Kaggle download
+    try:
+        print(f"  Attempting download from Kaggle...")
+        print(f"  If this fails, download manually from:")
+        print(f"    https://www.kaggle.com/datasets/junyiacademy/learning-activity-public-dataset-by-junyi-academy")
+        print(f"  Or from PSLC DataShop:")
+        print(f"    https://pslcdatashop.web.cmu.edu/DatasetInfo?datasetId=1198")
+        print(f"")
+        print(f"  Place these files in {dest_dir}/:")
+        print(f"    - junyi_ProblemLog_original.csv")
+        print(f"    - junyi_Exercise_table.csv")
+    except Exception as e:
+        print(f"  Error: {e}")
+
     return False
 
 
