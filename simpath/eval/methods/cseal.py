@@ -120,7 +120,7 @@ class CSEALMethod(BaseMethod):
             if vm.sum() == 0:
                 for c in range(self.num_c):
                     if c not in used: vm[c] = 1.0
-            with torch.no_grad(): lo, _ = self.policy(s, vm)
+            with torch.no_grad(): lo, _ = self.policy(s, None, vm)
             a = lo.argmax().item(); path.append(a); used.add(a)
         return path
 

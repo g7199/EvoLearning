@@ -109,7 +109,7 @@ class PPOVanillaMethod(BaseMethod):
                              dtype=torch.float32, device=self.device)
             vm = torch.ones(self.num_c, device=self.device)
             for c in used: vm[c] = 0
-            with torch.no_grad(): lo, _ = self.policy(s, vm)
+            with torch.no_grad(): lo, _ = self.policy(s, None, vm)
             a = lo.argmax().item(); path.append(a); used.add(a)
         return path
 

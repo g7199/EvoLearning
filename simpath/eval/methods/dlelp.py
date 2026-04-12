@@ -154,7 +154,7 @@ class DLELPMethod(BaseMethod):
             s_t = torch.tensor(state, dtype=torch.float32, device=self.device)
             vm_t = torch.tensor(vm, dtype=torch.float32, device=self.device)
             with torch.no_grad():
-                lo, _ = self.policy(s_t, vm_t)
+                lo, _ = self.policy(s_t, None, vm_t)
             a = lo.argmax().item()
             path.append(a)
             used.add(a)
