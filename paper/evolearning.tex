@@ -249,50 +249,30 @@ Table~\ref{tab:main} presents the EP scores across all datasets and path lengths
 \caption{Test EP scores across datasets and path lengths ($L \in \{5, 10, 20\}$). Best in \textbf{bold}, second best \underline{underlined}. All RL methods trained for 30K episodes; mean over 3 seeds reported. Entries marked --- are pending.}
 \label{tab:main}
 \resizebox{\textwidth}{!}{%
-\begin{tabular}{@{}ll|ccc|ccc@{}}
+\begin{tabular}{@{}cl|ccc|c|c|ccc|c|c@{}}
 \toprule
-& & \multicolumn{3}{c|}{\textbf{ASSISTments 2009} {\small(123 KCs, 921 train, 116 test)}} & \multicolumn{3}{c}{\textbf{Junyi Academy} {\small(39 KCs, 4000 train, 500 test)}} \\
-Category & Method & $L=5$ & $L=10$ & $L=20$ & $L=5$ & $L=10$ & $L=20$ \\
+& & \multicolumn{3}{c|}{Heuristic} & Seq. & RL & \multicolumn{3}{c|}{Graph-enhanced RL} & LLM & \textbf{Ours} \\
+Dataset & $L$ & Random & Target & Rule & GRU4Rec & PPO & CSEAL & GEHRL & DLELP & KnowLP & \textbf{\ours{}} \\
 \midrule
-\multirow{3}{*}{Heuristic}
-& Random             & $-$0.43          & ---              & ---              & $-$0.59          & ---              & --- \\
-& Target-repeat      & $-$0.07          & ---              & ---              & +0.17            & ---              & --- \\
-& Rule-based         & $-$0.60          & ---              & ---              & $-$0.91          & ---              & --- \\
+\multirow{3}{*}{\shortstack[c]{\textbf{ASSIST09}\\{\scriptsize 123 KCs}\\{\scriptsize 116 test}}}
+& 5  & $-$0.43 & $-$0.07 & $-$0.60 & +0.11 & \underline{+0.34} & +0.12 & +0.13 & --- & --- & \textbf{+0.37} \\
+& 10 & ---     & ---     & ---     & ---   & ---   & ---   & ---   & --- & --- & --- \\
+& 20 & ---     & ---     & ---     & ---   & ---   & ---   & ---   & --- & --- & --- \\
 \midrule
-Sequential
-& GRU4Rec            & +0.11            & ---              & ---              & +0.19            & ---              & --- \\
+\multirow{3}{*}{\shortstack[c]{\textbf{Junyi}\\{\scriptsize 39 KCs}\\{\scriptsize 500 test}}}
+& 5  & $-$0.59 & +0.17   & $-$0.91 & +0.19 & +0.15 & +0.10 & ---   & --- & --- & --- \\
+& 10 & ---     & ---     & ---     & ---   & ---   & ---   & ---   & --- & --- & --- \\
+& 20 & ---     & ---     & ---     & ---   & ---   & ---   & ---   & --- & --- & --- \\
 \midrule
-RL
-& PPO-vanilla        & \underline{+0.34}& ---              & ---              & +0.15            & ---              & --- \\
-\midrule
-\multirow{3}{*}{\shortstack[l]{Graph-\\enhanced RL}}
-& CSEAL              & +0.12            & ---              & ---              & +0.10            & ---              & --- \\
-& GEHRL              & +0.13            & ---              & ---              & ---              & ---              & --- \\
-& DLELP              & ---              & ---              & ---              & ---              & ---              & --- \\
-\midrule
-LLM-enhanced
-& KnowLP             & ---              & ---              & ---              & ---              & ---              & --- \\
-\midrule
-\rowcolor{gray!10}
-\textbf{Ours}
-& \textbf{\ours{}}   & \textbf{+0.37}   & ---              & ---              & ---              & ---              & --- \\
+% === Third dataset placeholder (uncomment when ready) ===
+% \multirow{3}{*}{\shortstack[c]{\textbf{EdNet}\\{\scriptsize -- KCs}\\{\scriptsize -- test}}}
+% & 5  & --- & --- & --- & --- & --- & --- & --- & --- & --- & --- \\
+% & 10 & --- & --- & --- & --- & --- & --- & --- & --- & --- & --- \\
+% & 20 & --- & --- & --- & --- & --- & --- & --- & --- & --- & --- \\
+% \midrule
 \bottomrule
 \end{tabular}%
 }
-
-\vspace{0.8em}
-% === Placeholder for third dataset ===
-% Uncomment and fill when ready:
-% \resizebox{\textwidth}{!}{%
-% \begin{tabular}{@{}ll|ccc@{}}
-% \toprule
-% & & \multicolumn{3}{c}{\textbf{EdNet} {\small(-- KCs, -- train, -- test)}} \\
-% Category & Method & $L=5$ & $L=10$ & $L=20$ \\
-% \midrule
-% ... & ... & --- & --- & --- \\
-% \bottomrule
-% \end{tabular}%
-% }
 \end{table*}
 
 \subsection{Convergence Analysis}
