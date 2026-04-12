@@ -54,19 +54,15 @@ def run_single_method(config: ExperimentConfig, method_name: str, device: str):
     # Load experts
     experts = None
     if method_cls.needs_experts:
-        evo_path = ds['evo_path']
+        evo_path = ds['evo_path_template'].format(L=config.L)
         if os.path.exists(evo_path):
             with open(evo_path, 'rb') as f:
                 experts = pickle.load(f)
-            # Validate expert path length matches L
-            if experts and len(experts[0][2]) < config.L:
-                print(f"  WARNING: Expert paths have length {len(experts[0][2])} "
-                      f"but L={config.L}. Experts will be used as-is (paths truncated to min).")
             print(f"  Experts: {len(experts)} from {evo_path} "
                   f"(path_len={len(experts[0][2]) if experts else 0})")
         else:
-            print(f"  WARNING: Expert file {evo_path} not found! "
-                  f"Methods requiring experts may fail.")
+            print(f"  WARNING: Expert file {evo_path} not found!")
+            print(f"  Run: python scripts/setup_pipeline.py --dataset {config.dataset} --L {config.L} --gpu 0")
 
     # Output directory
     out_dir = os.path.join(config.save_dir, f"{config.dataset}_L{config.L}_seed{config.seed}",

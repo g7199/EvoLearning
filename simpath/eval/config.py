@@ -25,7 +25,7 @@ DATASET_CONFIGS = {
         'graph_llm_path': 'outputs/concept_graph_assist09.pkl',
         'graph_thr': 0.25,
         'data_path': 'data/processed/assist09/assist09_processed.pkl',
-        'evo_path': 'outputs/evo_dpk5_dktgraph.pkl',
+        'evo_path_template': 'outputs/evo_dpk5_assist09_L{L}.pkl',
         'max_hist': 200,
     },
     'junyi': {
@@ -37,7 +37,7 @@ DATASET_CONFIGS = {
         'graph_llm_path': None,
         'graph_thr': 0.05,
         'data_path': 'data/processed/junyi/junyi_processed.pkl',
-        'evo_path': 'outputs/evo_dpk5_junyi.pkl',
+        'evo_path_template': 'outputs/evo_dpk5_junyi_L{L}.pkl',
         'max_hist': 200,
     },
 }

@@ -24,7 +24,7 @@ import numpy as np
 import torch
 
 
-def setup_assist09(gpu):
+def setup_assist09(gpu, L=5):
     """Full pipeline for ASSIST09 dataset."""
     device = gpu if gpu == 'cpu' else f'cuda:{gpu}'
     print(f"\n{'='*60}")
@@ -66,12 +66,12 @@ def setup_assist09(gpu):
         _build_dkt_graph('assist09', device)
 
     # Step 5: Generate Evo experts (DPP-5)
-    evo_path = 'outputs/evo_dpk5_dktgraph.pkl'
+    evo_path = f'outputs/evo_dpk5_assist09_L{L}.pkl'
     if os.path.exists(evo_path):
         print(f"  [4/5] Evo experts exist: {evo_path}")
     else:
-        print(f"  [4/5] Generating Evo experts (this takes ~1 hour)...")
-        _generate_evo_experts('assist09', device)
+        print(f"  [4/5] Generating Evo experts L={L} (this takes ~1 hour)...")
+        _generate_evo_experts('assist09', device, L=L, save_path=evo_path)
 
     # Step 6: KnowLP graph (optional, needs API key)
     knowlp_path = 'outputs/knowlp_graph_assist09.pkl'
@@ -95,7 +95,7 @@ def setup_assist09(gpu):
     return True
 
 
-def setup_junyi(gpu):
+def setup_junyi(gpu, L=5):
     """Full pipeline for Junyi dataset."""
     device = gpu if gpu == 'cpu' else f'cuda:{gpu}'
     print(f"\n{'='*60}")
@@ -134,12 +134,12 @@ def setup_junyi(gpu):
         _build_dkt_graph('junyi', device)
 
     # Step 5: Generate Evo experts
-    evo_path = 'outputs/evo_dpk5_junyi.pkl'
+    evo_path = f'outputs/evo_dpk5_junyi_L{L}.pkl'
     if os.path.exists(evo_path):
         print(f"  [4/5] Evo experts exist: {evo_path}")
     else:
-        print(f"  [4/5] Generating Evo experts (this takes ~1 hour)...")
-        _generate_evo_experts('junyi', device)
+        print(f"  [4/5] Generating Evo experts L={L} (this takes ~1 hour)...")
+        _generate_evo_experts('junyi', device, L=L, save_path=evo_path)
 
     # Step 6: KnowLP graph
     knowlp_path = 'outputs/knowlp_graph_junyi.pkl'
@@ -214,7 +214,7 @@ def _build_dkt_graph(dataset, device):
     print(f"    Saved: {ds['graph_dkt_path']}")
 
 
-def _generate_evo_experts(dataset, device):
+def _generate_evo_experts(dataset, device, L=5, save_path=None):
     """Generate DPP-5 diverse Evo expert trajectories."""
     import heapq
     from simpath.eval.config import get_dataset_config
@@ -228,7 +228,7 @@ def _generate_evo_experts(dataset, device):
     train_data, _, _ = load_data(ds)
     graph = load_graph(ds, 'dkt')
 
-    num_c = ds['num_c']; L = 5; POP = 60; GEN = 50; CAP = 30
+    num_c = ds['num_c']; POP = 60; GEN = 50; CAP = 30
 
     def get_candidates(targets, mastery):
         r = set()
@@ -334,21 +334,24 @@ def _generate_evo_experts(dataset, device):
                   f"{(si+1)/(time.time()-t0):.2f} st/s", flush=True)
 
     os.makedirs('outputs', exist_ok=True)
-    with open(ds['evo_path'], 'wb') as f:
+    if save_path is None:
+        save_path = ds['evo_path_template'].format(L=L)
+    with open(save_path, 'wb') as f:
         pickle.dump(all_experts, f)
-    print(f"    Saved {len(all_experts)} experts to {ds['evo_path']}")
+    print(f"    Saved {len(all_experts)} experts to {save_path}")
 
 
 if __name__ == '__main__':
     p = argparse.ArgumentParser(description="EvoLearning Setup Pipeline")
     p.add_argument('--dataset', default='all', choices=['assist09', 'junyi', 'all'])
     p.add_argument('--gpu', default='0')
+    p.add_argument('--L', type=int, default=5, help='Path length for Evo experts (5, 10, 20)')
     args = p.parse_args()
 
     if args.dataset in ('assist09', 'all'):
-        setup_assist09(args.gpu)
+        setup_assist09(args.gpu, L=args.L)
     if args.dataset in ('junyi', 'all'):
-        setup_junyi(args.gpu)
+        setup_junyi(args.gpu, L=args.L)
 
     print(f"\n{'='*60}")
     print(f"  Setup complete! Run experiments with:")
