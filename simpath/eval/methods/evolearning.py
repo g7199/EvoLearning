@@ -44,8 +44,8 @@ class EvoLearningMethod(BaseMethod):
         bc_a_t = torch.tensor(bc_a, dtype=torch.long, device=dev)
         bc_opt = torch.optim.Adam(policy.parameters(), lr=1e-3, weight_decay=1e-4)
 
-        # Total = BC(3000) + PPO(n_episodes), so tqdm shows combined progress
-        bc_epochs = 3000
+        # Total = BC(5000) + PPO(n_episodes), so tqdm shows combined progress
+        bc_epochs = 5000
         total_steps = bc_epochs + n_episodes
 
         best_bc = -999; best_bc_state = None

@@ -33,7 +33,7 @@ class BaseMethod(ABC):
     def load(self, path: str): ...
 
     def _update_progress(self, out_dir, ep, n_episodes, reward=None, val=None):
-        """Write progress to JSON for tqdm monitoring + accumulate history."""
+        """Write progress to JSON for tqdm + append val to val_history.csv."""
         if out_dir is None:
             return
         progress_path = os.path.join(out_dir, 'progress.json')
@@ -51,7 +51,6 @@ class BaseMethod(ABC):
         if val is not None:
             entry['val'] = round(float(val), 4)
 
-        # Append to history (avoid duplicates)
         if not history or history[-1].get('ep') != ep:
             history.append(entry)
 
@@ -67,6 +66,19 @@ class BaseMethod(ABC):
                 json.dump(p, f)
         except Exception:
             pass
+
+        # Append val results to CSV (easy to monitor)
+        if val is not None:
+            csv_path = os.path.join(out_dir, 'val_history.csv')
+            write_header = not os.path.exists(csv_path)
+            try:
+                with open(csv_path, 'a') as f:
+                    if write_header:
+                        f.write('ep,val,reward\n')
+                    r_str = f'{reward:.4f}' if reward is not None else ''
+                    f.write(f'{ep},{val:.4f},{r_str}\n')
+            except Exception:
+                pass
 
 
 class PolicyNet(nn.Module):
