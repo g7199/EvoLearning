@@ -97,13 +97,15 @@ Knowledge tracing (KT) models estimate a learner's evolving mastery over time fr
 
 Early LPR methods relied on heuristic rules such as prerequisite ordering~\cite{chen2018prerequisite} and difficulty matching~\cite{liu2019cseal}. The CSEAL framework~\cite{liu2019cseal} introduced the KES paradigm, training an RL agent within a DKT simulator using actor-critic methods with cognitive navigation---restricting the action space to graph-related concepts. SRC~\cite{wang2023src} formulated LPR as a set-to-sequence problem with concept-aware ranking. GEHRL~\cite{li2023gehrl} proposed hierarchical RL with a goal-planning agent and a goal-achieving agent, incorporating graph-based candidate filtering. DLELP and KnowLP~\cite{cheng2025knowlp} employ a multi-agent system with prerequisite and similarity agents, using EDU-GraphRAG for knowledge graph construction. GRU4Rec~\cite{hidasi2016gru4rec}, originally designed for session-based recommendation, has been adapted for sequential learning path generation.
 
-\subsection{Bridging Search and Policy Optimization}
+\subsection{Evolutionary Algorithms and Reinforcement Learning}
 
-The paradigm of initializing RL with demonstrations has been studied extensively in robotics. Rajeswaran et al.~\cite{rajeswaran2018dexterous} use human demonstrations to warm-start natural policy gradient for dexterous manipulation, and Nair et al.~\cite{nair2018demonstrations} augment replay buffers with demonstrations to overcome exploration in sparse-reward tasks. These works rely on \emph{pre-existing expert demonstrations} (e.g., human teleoperation), which are expensive to collect and domain-specific.
+The paradigm of initializing RL with demonstrations has been studied in robotics~\cite{rajeswaran2018dexterous,nair2018demonstrations}, but these works rely on \emph{pre-existing} human demonstrations. In education, expert learning paths do not exist in the data, necessitating automatic demonstration generation.
 
-Our approach differs in a fundamental way: we \emph{generate} demonstrations automatically via evolutionary search, eliminating the need for human experts. This is made possible by a key property of the LPR domain: the KES provides a \emph{zero-cost, deterministic simulator}. Evaluating a candidate path requires only $L$ forward passes through a small LSTM, making per-instance evolutionary search tractable---each learner's optimal path can be approximated through 60 candidates over 50 generations in under one second. In contrast, robotics domains require expensive physical simulation, making per-instance search infeasible.
+Evolutionary algorithms (EAs) offer several structural advantages for this role. First, EAs are naturally robust to \emph{sparse rewards}---unlike RL policy gradients that require informative gradient signals, EAs evaluate complete solutions end-to-end and select based on fitness alone. As Salimans et al.~\cite{salimans2017es} observe, ``ES does not suffer in settings with sparse rewards,'' whereas RL policies initialized randomly ``often manifest as random jitter on spot for a long time.'' Second, fitness evaluations across individuals are independent, enabling straightforward GPU parallelization~\cite{wang2026gpuea}: in our setting, evaluating a candidate path requires only $L$ DKT forward passes, and an entire population of 60 paths can be batch-evaluated on a single GPU in milliseconds. Third, the variation-selection mechanism of EAs is more robust to local optima than gradient descent, which tends to get stuck due to approximation errors~\cite{sigaud2023evorl}.
 
-Hybrid evolutionary-gradient methods such as ERL~\cite{khadka2018erl} and population-based training~\cite{jaderberg2017pbt} integrate evolution into the RL training loop, but evolve the \emph{policy parameters} rather than generating per-instance demonstrations. Evolutionary strategies~\cite{salimans2017es} replace gradient descent entirely. Our approach occupies a different point in this design space: evolution operates at the \emph{solution level} (generating paths for individual learners), while gradient-based learning operates at the \emph{policy level} (generalizing across learners). This separation allows each component to operate in its natural regime.
+However, EAs alone are insufficient for deployment. They search within a fixed candidate set $\mathcal{C}$ per learner, and---critically---they require the simulator for fitness evaluation. In a real tutoring system, one cannot ask a student to ``try 3,000 different study plans'' to find the best one. EAs are thus restricted to the \emph{training phase}, where the KES provides cheap evaluation. This motivates the need for behavioral cloning: BC compresses the per-instance evolutionary solutions into a \emph{generalizable neural policy} that handles unseen learners via a single forward pass, without any simulator access.
+
+The broader EvoRL literature~\cite{li2024evorl} has shown that combining EAs with RL enhances sample efficiency and exploratory capability. Hybrid methods such as ERL~\cite{khadka2018erl} co-evolve populations alongside gradient-trained actors, and population-based training~\cite{jaderberg2017pbt} evolves hyperparameters online. Our approach differs structurally: evolution operates at the \emph{solution level} (finding paths for individual learners), while gradient-based learning operates at the \emph{policy level} (generalizing across learners). This separation allows each component to operate in its natural regime---EAs for combinatorial per-instance search, neural networks for cross-instance generalization.
 
 %% ============================================================
 \section{Preliminaries}
@@ -529,6 +531,21 @@ A.~Rajeswaran, V.~Kumar, A.~Gupta, G.~Vezzani, J.~Schulman, E.~Todorov, and S.~L
 A.~Nair, B.~McGrew, M.~Andrychowicz, W.~Zaremba, and P.~Abbeel.
 \newblock Overcoming exploration in reinforcement learning with demonstrations.
 \newblock In \emph{IEEE International Conference on Robotics and Automation (ICRA)}, pages 6292--6299, 2018.
+
+\bibitem{wang2026gpuea}
+S.~Wang, Y.~Jiang, and others.
+\newblock Scaling behaviors of evolutionary algorithms on {GPU}s: When does parallelism pay off?
+\newblock \emph{arXiv preprint arXiv:2601.18446}, 2026.
+
+\bibitem{li2024evorl}
+P.~Li, J.~Hao, H.~Tang, X.~Fu, Y.~Zhen, and K.~Tang.
+\newblock Evolutionary reinforcement learning: A survey.
+\newblock \emph{IEEE Transactions on Evolutionary Computation}, 2024.
+
+\bibitem{sigaud2023evorl}
+O.~Sigaud.
+\newblock Combining evolution and deep reinforcement learning for policy search: A survey.
+\newblock \emph{ACM Transactions on Evolutionary Learning and Optimization}, 2023.
 
 \bibitem{li2024privileged}
 Q.~Li, W.~Xia, L.~Yin, J.~Jin, and Y.~Yu.
