@@ -27,13 +27,19 @@ class EvoLearningMethod(BaseMethod):
         policy = self.policy
         NC = self.num_c; L = self.L; dev = self.device
 
-        # ═══ Stage 1: BC on expert trajectories ═══
-        print(f"  [{self.name}] BC on {len(experts)} experts...", flush=True)
+        # ═══ Stage 1: BC on expert trajectories (ht: per-step mastery) ═══
+        print(f"  [{self.name}] BC on {len(experts)} experts (ht mastery)...", flush=True)
         bc_s, bc_a = [], []
-        for mastery, tgts, path, ep, *_ in experts:
+        for ei, (mastery, tgts, path, ep, hc, hr) in enumerate(experts):
+            sc, sr = list(hc), list(hr)
+            cur_m = kes.mastery(sc, sr)
             for step, action in enumerate(path[:L]):
-                bc_s.append(make_state_standard(mastery, tgts, step, L, NC))
+                bc_s.append(make_state_standard(cur_m, tgts, step, L, NC))
                 bc_a.append(action)
+                sc.append(action); sr.append(1 if cur_m[action] > 0.5 else 0)
+                cur_m = kes.mastery(sc, sr)
+            if (ei + 1) % 1000 == 0:
+                print(f"    BC prep: {ei+1}/{len(experts)}", flush=True)
         bc_s_t = torch.tensor(np.array(bc_s), dtype=torch.float32, device=dev)
         bc_a_t = torch.tensor(bc_a, dtype=torch.long, device=dev)
         bc_opt = torch.optim.Adam(policy.parameters(), lr=1e-3, weight_decay=1e-4)
