@@ -123,7 +123,7 @@ def setup_junyi(gpu):
         print(f"  [2/5] DKT model exists: {dkt_path}")
     else:
         print(f"  [2/5] Training DKT on Junyi...")
-        os.system(f'{sys.executable} scripts/train_dkt_junyi.py')
+        os.system(f'{sys.executable} scripts/train_dkt_junyi.py --device {device}')
 
     # Step 4: Build DKT influence graph
     graph_path = 'outputs/concept_graph_dkt_junyi.pkl'

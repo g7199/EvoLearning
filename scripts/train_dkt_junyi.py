@@ -6,6 +6,7 @@ CSEAL split: 50% dataSim (DKT training), 50% dataOff (RL).
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+import argparse
 import torch
 import torch.nn as nn
 import numpy as np
@@ -15,7 +16,10 @@ warnings.filterwarnings('ignore')
 from pykt.models import init_model
 from sklearn.metrics import roc_auc_score
 
-DEVICE = 'cuda:1'  # GPU:1 — bc-init just finished, GPU:0 has CSEAL
+parser = argparse.ArgumentParser()
+parser.add_argument('--device', default='cuda:0' if torch.cuda.is_available() else 'cpu')
+args = parser.parse_args()
+DEVICE = args.device
 NUM_C = 39  # Junyi has 39 KCs
 MAX_LEN = 200
 BATCH = 128
