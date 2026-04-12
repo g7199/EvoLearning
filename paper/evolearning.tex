@@ -8,7 +8,6 @@
 \usepackage{xcolor}
 \usepackage{graphicx}
 \usepackage{subcaption}
-\usepackage{float}
 \usepackage{enumitem}
 
 \newcommand{\ours}{\textsc{EvoLearning}}
@@ -62,11 +61,13 @@ Sequential recommendation---predicting the next item a user should interact with
 
 Recent work frames LPR as a reinforcement learning (RL) problem within a knowledge evolution simulator (KES)---typically a deep knowledge tracing (DKT) model~\cite{piech2015dkt} that predicts how a learner's mastery evolves as they practice concepts~\cite{liu2019cseal}. Methods such as CSEAL~\cite{liu2019cseal}, SRC~\cite{wang2023src}, GEHRL~\cite{li2023gehrl}, and DLELP/KnowLP~\cite{cheng2025knowlp} have demonstrated the viability of this paradigm.
 
-However, LPR presents a challenge that sets it apart from typical sequential recommendation: the \textbf{search space explosion} in long-horizon paths. Unlike next-item recommendation where only one step is predicted, LPR requires optimizing an \emph{entire sequence} of $L$ concepts jointly. The number of distinct paths grows as $\binom{M}{L} \cdot L!$---for $M=123$ and $L=20$, this exceeds $10^{30}$. Moreover, the reward is inherently \emph{sparse}: only the final mastery improvement after all $L$ steps provides a learning signal, with no intermediate feedback. This combination of combinatorial action space and sparse rewards makes na\"ive RL exploration prohibitively slow, particularly for the longer paths ($L \geq 10$) that are pedagogically necessary in practice.
+However, existing RL-based LPR methods harbor a critical but overlooked assumption: \textbf{they require the simulator at inference time}. During path generation, methods like CSEAL~\cite{liu2019cseal} and GEHRL~\cite{li2023gehrl} feed each recommended concept back through the KES to obtain the updated mastery $\mathbf{h}_t$, which is then used to select the next concept. As Li et al.~\cite{li2024privileged} point out, this is fundamentally invalid in real deployment: the simulator's internal knowledge state reflects what \emph{would} happen if the student practiced---but the student has not yet practiced. Using $\mathbf{h}_t$ during inference is analogous to \emph{planning a study schedule while already knowing the exam answers}.
 
-A natural solution would be to learn from expert demonstrations via behavioral cloning (BC)---a well-established approach in robotics~\cite{rajeswaran2018dexterous,nair2018demonstrations}. However, unlike robotics where human teleoperators can provide demonstrations, in education \emph{expert learning paths do not naturally exist in the data}. Student interaction logs record what learners \emph{actually did}, not what they \emph{should have done}. Collecting optimal demonstrations would require controlled experiments with expert tutors for each individual learner---clearly infeasible at scale.
+Removing this simulator dependency---requiring the policy to plan from only the initial mastery $\mathbf{h}_0$---makes the problem dramatically harder. The policy must commit to an \emph{entire path of $L$ concepts without any intermediate feedback}, a form of \textbf{blind planning}. The search space grows as $\binom{M}{L} \cdot L!$---exceeding $10^{30}$ for $M=123$ and $L=20$---and the reward is \emph{sparse}, arriving only after the full path is executed. Without intermediate mastery signals to guide exploration, a randomly initialized RL policy is overwhelmed by this combinatorial blind search.
 
-We propose \ours{}, a framework that resolves this demonstration gap through \emph{evolutionary pre-exploration}. The key insight is that while expert demonstrations are unavailable in the data, they can be \emph{synthesized} cheaply: the KES provides a zero-cost simulator in which evolutionary algorithms can efficiently search for high-quality paths \emph{per individual learner}. This is particularly effective for LPR because, unlike domains where simulation is expensive, evaluating a candidate path requires only $L$ forward passes through a small LSTM. Evolution thus serves as an automatic expert tutor, generating near-optimal demonstrations that would be prohibitively expensive to obtain from human experts.
+Moreover, expert demonstrations for learning paths \emph{do not naturally exist in the data}. Student logs record what learners \emph{actually did}, not what they \emph{should have done}~\cite{rajeswaran2018dexterous,nair2018demonstrations}. Collecting optimal demonstrations would require controlled experiments with expert tutors for each individual learner---clearly infeasible at scale.
+
+We propose \ours{}, a framework that resolves both challenges---blind planning and the demonstration gap---through \emph{evolutionary pre-exploration}. The KES, while forbidden at inference, remains available during training. We exploit this asymmetry: an evolutionary algorithm searches for high-quality paths within the KES \emph{per individual learner}, synthesizing the expert demonstrations that cannot be found in the data. These demonstrations are then distilled into a simulator-free policy that plans entirely from $\mathbf{h}_0$, and refined via an asymmetric actor-critic PPO where only the critic accesses the privileged $\mathbf{h}_t$.
 
 \begin{enumerate}
     \item \textbf{Evolutionary Expert Generation.} For each training learner, an evolutionary algorithm efficiently searches the path space within the KES. A diversity-regularized greedy selection inspired by determinantal point processes (DPP)~\cite{kulesza2012dpp} yields $K$ diverse expert trajectories per learner, ensuring broad coverage of effective strategies.
@@ -140,7 +141,17 @@ where $E_g^{\text{start}}$ and $E_g^{\text{end}}$ are the learner's mastery of t
 We construct a concept graph $\mathcal{G}_c = (\mathcal{K}, \mathcal{E}_p, \mathcal{E}_s)$ where $\mathcal{E}_p$ denotes prerequisite edges and $\mathcal{E}_s$ denotes similarity edges. Following prior work~\cite{liu2019cseal,cheng2025knowlp}, we derive these from the DKT's cross-concept influence: for each concept $k_i$, we measure the change in mastery of all other concepts when $k_i$ is practiced correctly. An edge $(k_i, k_j) \in \mathcal{E}_p$ if the influence exceeds a threshold $\tau$.
 
 %% ============================================================
-\section{Method: \ours{}}
+\section{Method}
+
+\begin{figure*}[htb!]
+    \centering
+    % Placeholder for framework figure
+    \fbox{\parbox{0.95\textwidth}{\centering\vspace{3cm}\textbf{Figure placeholder:} EvoLearning three-stage pipeline\\[1em]
+    \small Stage 1: Evo Expert Generation (per-learner search + DPP diversity) $\longrightarrow$ Stage 2: Behavioral Cloning ($\mathbf{h}_0$ state) $\longrightarrow$ Stage 3: Asymmetric PPO (actor: $\mathbf{h}_0$, critic: $\mathbf{h}_t$)\\[0.5em]
+    Inference: actor only ($\mathbf{h}_0 \to$ path), no KES dependency\vspace{2cm}}}
+    \caption{Overview of the \ours{} framework. Stage~1 generates diverse expert trajectories via evolutionary search with DPP-inspired diversity selection. Stage~2 distills these into a simulator-free policy via behavioral cloning using only the initial mastery $\mathbf{h}_0$. Stage~3 refines the policy through asymmetric PPO: the actor sees $\mathbf{h}_0$ (matching inference), while the critic receives the privileged evolving mastery $\mathbf{h}_t$ from the KES for more accurate value estimation. At deployment, only the actor is used---no simulator access required.}
+    \label{fig:framework}
+\end{figure*}
 %% ============================================================
 
 \ours{} consists of three stages, as illustrated in Figure~\ref{fig:framework}. We describe each stage and the overall training pipeline.
@@ -212,16 +223,6 @@ where $\rho_t = \pi_\theta(a_t|\mathbf{s}_t^{\text{actor}}) / \pi_{\theta_{\text
 \begin{equation}
     \mathcal{L} = \mathcal{L}_{\ppo} + c_v \cdot \mathcal{L}_{\text{value}} - c_e \cdot H[\pi_\theta]
 \end{equation}
-
-\begin{figure*}[H]
-    \centering
-    % Placeholder for framework figure
-    \fbox{\parbox{0.95\textwidth}{\centering\vspace{3cm}\textbf{Figure placeholder:} EvoLearning three-stage pipeline\\[1em]
-    \small Stage 1: Evo Expert Generation (per-learner search + DPP diversity) $\longrightarrow$ Stage 2: Behavioral Cloning ($\mathbf{h}_0$ state) $\longrightarrow$ Stage 3: Asymmetric PPO (actor: $\mathbf{h}_0$, critic: $\mathbf{h}_t$)\\[0.5em]
-    Inference: actor only ($\mathbf{h}_0 \to$ path), no KES dependency\vspace{2cm}}}
-    \caption{Overview of the \ours{} framework. Stage~1 generates diverse expert trajectories via evolutionary search with DPP-inspired diversity selection. Stage~2 distills these into a simulator-free policy via behavioral cloning using only the initial mastery $\mathbf{h}_0$. Stage~3 refines the policy through asymmetric PPO: the actor sees $\mathbf{h}_0$ (matching inference), while the critic receives the privileged evolving mastery $\mathbf{h}_t$ from the KES for more accurate value estimation. At deployment, only the actor is used---no simulator access required.}
-    \label{fig:framework}
-\end{figure*}
 
 %% ============================================================
 \section{Experiments}
