@@ -101,7 +101,7 @@ class DLELPMethod(BaseMethod):
                 self._update_progress(out_dir, ep_i+1, n_episodes, reward=all_rew[-1].mean())
             if (ep_i + 1) % val_interval == 0:
                 policy.eval()
-                eps = kes.evaluate_batch(val_data, lambda m, t: self.predict(m, t))
+                eps = kes.evaluate_batch(val_data, lambda m, t, k, hc, hr: self.predict(m, t, k, hc, hr))
                 vep = np.mean(eps); mk = ''
                 if vep > bv:
                     bv = vep; self._best_state = {k: v.clone() for k, v in policy.state_dict().items()}
@@ -118,11 +118,14 @@ class DLELPMethod(BaseMethod):
             policy.load_state_dict(self._best_state)
         print(f"  [{self.name}] Best Val = {bv:+.4f}")
 
-    def predict(self, mastery, targets):
+    def predict(self, mastery, targets, kes=None, hc=None, hr=None):
         """Inference with S-Agent: plateau → insert similar, skip P-Agent that step."""
         self.policy.eval()
         path, used = [], set()
+        cur_m = mastery.copy()
         prev_m = None
+        sc = list(hc) if hc else []
+        sr = list(hr) if hr else []
         for step in range(self.L):
             if len(path) >= self.L:
                 break
@@ -131,13 +134,16 @@ class DLELPMethod(BaseMethod):
             s_agent_fired = False
             if step > 0 and prev_m is not None and len(path) > 0:
                 last_c = path[-1]
-                if (mastery[last_c] - prev_m[last_c]) < S_THRESHOLD:
+                if (cur_m[last_c] - prev_m[last_c]) < S_THRESHOLD:
                     sims = self.graph.get_similar(last_c, top_k=10)
-                    for sc in sims:
-                        if sc not in used and mastery[sc] < 0.7:
-                            path.append(sc)
-                            used.add(sc)
+                    for s in sims:
+                        if s not in used and cur_m[s] < 0.7:
+                            path.append(s)
+                            used.add(s)
                             s_agent_fired = True
+                            if kes is not None:
+                                sc.append(s); sr.append(1 if cur_m[s] > 0.5 else 0)
+                                cur_m = kes.mastery(sc, sr)
                             break
 
             if s_agent_fired:
@@ -147,8 +153,8 @@ class DLELPMethod(BaseMethod):
                 break
 
             # P-Agent: softmax over all concepts (only exclude used)
-            prev_m = mastery.copy()
-            state = make_state_dlelp(mastery, targets, self.num_c)
+            prev_m = cur_m.copy()
+            state = make_state_dlelp(cur_m, targets, self.num_c)
             vm = np.ones(self.num_c, dtype=np.float32)
             for c in used: vm[c] = 0
             s_t = torch.tensor(state, dtype=torch.float32, device=self.device)
@@ -158,6 +164,9 @@ class DLELPMethod(BaseMethod):
             a = lo.argmax().item()
             path.append(a)
             used.add(a)
+            if kes is not None:
+                sc.append(a); sr.append(1 if cur_m[a] > 0.5 else 0)
+                cur_m = kes.mastery(sc, sr)
         return path[:self.L]
 
     def save(self, path):

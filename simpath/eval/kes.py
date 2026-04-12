@@ -64,11 +64,13 @@ class KES:
         return float(np.mean(vals)) if vals else 0.0
 
     def evaluate_batch(self, data_split, predict_fn) -> List[float]:
-        """Evaluate predict_fn on a data split. Returns list of EP scores."""
+        """Evaluate predict_fn on a data split. Returns list of EP scores.
+        predict_fn signature: (mastery, targets, kes, hc, hr) -> path
+        """
         eps = []
         for hc, hr, tgts in data_split:
             m = self.mastery(hc, hr)
-            path = predict_fn(m, tgts)
+            path = predict_fn(m, tgts, self, hc, hr)
             eps.append(self.evaluate(hc, hr, path, tgts))
         return eps
 

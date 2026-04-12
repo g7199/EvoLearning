@@ -99,8 +99,8 @@ def run_single_method(config: ExperimentConfig, method_name: str, device: str):
     }
 
     # Latest model evaluation
-    latest_val = kes.evaluate_batch(val_data, lambda m, t: method.predict(m, t))
-    latest_test = kes.evaluate_batch(test_data, lambda m, t: method.predict(m, t))
+    latest_val = kes.evaluate_batch(val_data, lambda m, t, k, hc, hr: method.predict(m, t, k, hc, hr))
+    latest_test = kes.evaluate_batch(test_data, lambda m, t, k, hc, hr: method.predict(m, t, k, hc, hr))
     report['latest_val_ep'] = float(np.mean(latest_val))
     report['latest_test_ep'] = float(np.mean(latest_test))
     report['latest_test_std'] = float(np.std(latest_test))
@@ -118,8 +118,8 @@ def run_single_method(config: ExperimentConfig, method_name: str, device: str):
             method.low.load_state_dict(method._best_l)
         method.save(best_path)
 
-        best_val = kes.evaluate_batch(val_data, lambda m, t: method.predict(m, t))
-        best_test = kes.evaluate_batch(test_data, lambda m, t: method.predict(m, t))
+        best_val = kes.evaluate_batch(val_data, lambda m, t, k, hc, hr: method.predict(m, t, k, hc, hr))
+        best_test = kes.evaluate_batch(test_data, lambda m, t, k, hc, hr: method.predict(m, t, k, hc, hr))
         report['best_val_ep'] = float(np.mean(best_val))
         report['best_test_ep'] = float(np.mean(best_test))
         report['best_test_std'] = float(np.std(best_test))

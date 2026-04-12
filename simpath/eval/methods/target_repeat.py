@@ -12,5 +12,5 @@ class TargetRepeatMethod(BaseMethod):
     def train(self, train_data, val_data, kes, graph, experts, out_dir=None, **kwargs):
         pass
 
-    def predict(self, mastery, targets):
+    def predict(self, mastery, targets, kes=None, hc=None, hr=None):
         return (targets * ((self.L // len(targets)) + 1))[:self.L]

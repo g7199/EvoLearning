@@ -104,7 +104,7 @@ class GRU4RecMethod(BaseMethod):
                 acc = (logits.argmax(-1) == ga[bi]).float().mean().item()
                 print(f"    [{self.name}] Epoch {epoch+1}/{n_epochs} | Acc={acc:.4f}", flush=True)
 
-    def predict(self, mastery, targets):
+    def predict(self, mastery, targets, kes=None, hc=None, hr=None):
         return self.model.generate(mastery, targets, self.L)
 
     def save(self, path):

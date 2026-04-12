@@ -17,7 +17,7 @@ class RuleBasedMethod(BaseMethod):
     def train(self, train_data, val_data, kes, graph, experts, out_dir=None, **kwargs):
         self.graph = graph
 
-    def predict(self, mastery, targets):
+    def predict(self, mastery, targets, kes=None, hc=None, hr=None):
         order = self.graph.find_learning_order(targets, mastery, mastery_threshold=0.5)
         path = order[:self.L]
         if len(path) < self.L:

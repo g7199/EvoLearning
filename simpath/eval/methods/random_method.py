@@ -12,7 +12,7 @@ class RandomMethod(BaseMethod):
     def train(self, train_data, val_data, kes, graph, experts, out_dir=None, **kwargs):
         pass
 
-    def predict(self, mastery, targets):
+    def predict(self, mastery, targets, kes=None, hc=None, hr=None):
         pool = list(range(self.num_c))
         np.random.shuffle(pool)
         return pool[:self.L]

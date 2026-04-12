@@ -175,7 +175,7 @@ class GEHRLMethod(BaseMethod):
                 self._update_progress(out_dir, ep_i+1, n_episodes, reward=ah_rew[-1].mean())
             if (ep_i + 1) % val_interval == 0:
                 self.high.eval(); self.low.eval()
-                eps = kes.evaluate_batch(val_data, lambda m, t: self.predict(m, t))
+                eps = kes.evaluate_batch(val_data, lambda m, t, k, hc, hr: self.predict(m, t, k, hc, hr))
                 vep = np.mean(eps); mk = ''
                 if vep > bv:
                     bv = vep
@@ -195,7 +195,7 @@ class GEHRLMethod(BaseMethod):
             self.low.load_state_dict(self._best_l)
         print(f"  [{self.name}] Best Val = {bv:+.4f}")
 
-    def predict(self, mastery, targets):
+    def predict(self, mastery, targets, kes=None, hc=None, hr=None):
         self.high.eval(); self.low.eval()
         NC = self.num_c; L = self.L; dev = self.device
         tgts_pad = np.zeros(MAX_TARGETS, dtype=np.int64)
@@ -203,18 +203,21 @@ class GEHRLMethod(BaseMethod):
         nt = min(len(targets), MAX_TARGETS)
         tgts_pad[:nt] = targets[:nt]; tgts_m[:nt] = 1.0
         path, used = [], set()
+        cur_m = mastery
+        sc = list(hc) if hc else []
+        sr = list(hr) if hr else []
         for step in range(L):
-            tm = mastery[tgts_pad]; tg = 1.0 - tm
-            hs = torch.tensor(np.concatenate([mastery, tm, tg, [step/L]]),
+            tm = cur_m[tgts_pad]; tg = 1.0 - tm
+            hs = torch.tensor(np.concatenate([cur_m, tm, tg, [step/L]]),
                               dtype=torch.float32, device=dev)
             hvm = torch.tensor(tgts_m, dtype=torch.float32, device=dev)
             with torch.no_grad(): h_lo, _ = self.high(hs, hvm)
             gi = h_lo.argmax().item()
             goal = tgts_pad[min(gi, nt - 1)]
             goh = np.zeros(NC, dtype=np.float32); goh[goal] = 1.0
-            ls = torch.tensor(np.concatenate([mastery, goh, [step/L]]),
+            ls = torch.tensor(np.concatenate([cur_m, goh, [step/L]]),
                               dtype=torch.float32, device=dev)
-            cands = get_goal_candidates(goal, mastery, self.graph, NC, used, cap=20)
+            cands = get_goal_candidates(goal, cur_m, self.graph, NC, used, cap=20)
             vm = np.zeros(NC, dtype=np.float32)
             for c in cands: vm[c] = 1.0
             if vm.sum() == 0:
@@ -223,6 +226,9 @@ class GEHRLMethod(BaseMethod):
             lvm = torch.tensor(vm, dtype=torch.float32, device=dev)
             with torch.no_grad(): l_lo, _ = self.low(ls, lvm)
             a = l_lo.argmax().item(); path.append(a); used.add(a)
+            if kes is not None:
+                sc.append(a); sr.append(1 if cur_m[a] > 0.5 else 0)
+                cur_m = kes.mastery(sc, sr)
         return path
 
     def save(self, path):

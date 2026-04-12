@@ -54,7 +54,7 @@ class EvoLearningMethod(BaseMethod):
                 self._update_progress(out_dir, epoch+1, total_steps, reward=loss.item())
             if (epoch + 1) % 500 == 0:
                 policy.eval()
-                eps = kes.evaluate_batch(val_data, lambda m, t: self.predict(m, t))
+                eps = kes.evaluate_batch(val_data, lambda m, t, k, hc, hr: self.predict(m, t, k, hc, hr))
                 vep = np.mean(eps); mk = ''
                 if vep > best_bc:
                     best_bc = vep; best_bc_state = {k: v.clone() for k, v in policy.state_dict().items()}; mk = ' ***'
@@ -120,7 +120,7 @@ class EvoLearningMethod(BaseMethod):
                 self._update_progress(out_dir, bc_epochs + ep_i+1, total_steps, reward=all_rew[-1].mean())
             if (ep_i + 1) % val_interval == 0:
                 policy.eval()
-                eps = kes.evaluate_batch(val_data, lambda m, t: self.predict(m, t))
+                eps = kes.evaluate_batch(val_data, lambda m, t, k, hc, hr: self.predict(m, t, k, hc, hr))
                 vep = np.mean(eps); mk = ''
                 if vep > bv:
                     bv = vep; self._best_state = {k: v.clone() for k, v in policy.state_dict().items()}
@@ -137,16 +137,22 @@ class EvoLearningMethod(BaseMethod):
             policy.load_state_dict(self._best_state)
         print(f"  [{self.name}] Best Val = {bv:+.4f}")
 
-    def predict(self, mastery, targets):
+    def predict(self, mastery, targets, kes=None, hc=None, hr=None):
         self.policy.eval()
         path, used = [], set()
+        cur_m = mastery
+        sc = list(hc) if hc else []
+        sr = list(hr) if hr else []
         for step in range(self.L):
-            s = torch.tensor(make_state_standard(mastery, targets, step, self.L, self.num_c),
+            s = torch.tensor(make_state_standard(cur_m, targets, step, self.L, self.num_c),
                              dtype=torch.float32, device=self.device)
             vm = torch.ones(self.num_c, device=self.device)
             for c in used: vm[c] = 0
             with torch.no_grad(): lo, _ = self.policy(s, vm)
             a = lo.argmax().item(); path.append(a); used.add(a)
+            if kes is not None:
+                sc.append(a); sr.append(1 if cur_m[a] > 0.5 else 0)
+                cur_m = kes.mastery(sc, sr)
         return path
 
     def save(self, path):
