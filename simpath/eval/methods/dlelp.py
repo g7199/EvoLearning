@@ -58,20 +58,21 @@ class DLELPMethod(BaseMethod):
             sr_b = [list(hr_b[i]) for i in range(batch_size)]
             used_b = [set() for _ in range(batch_size)]
 
-            all_s, all_a, all_lp, all_v, all_vm, all_rew = [], [], [], [], [], []
+            all_s, all_sc, all_a, all_lp, all_v, all_vm, all_rew = [], [], [], [], [], [], []
 
             for step in range(L):
-                sb, vmb = [], []
+                sb, scb, vmb = [], [], []
                 for i in range(batch_size):
                     state = make_state_dlelp(init_mastery_b[i], tgts_b[i], NC)
-                    # Paper: softmax over ALL concepts, only exclude used
+                    state_c = make_state_dlelp(sim_mastery_b[i], tgts_b[i], NC)
                     vm = np.ones(NC, dtype=np.float32)
                     for c in used_b[i]: vm[c] = 0
                     sb.append(torch.tensor(state, dtype=torch.float32, device=dev))
+                    scb.append(torch.tensor(state_c, dtype=torch.float32, device=dev))
                     vmb.append(torch.tensor(vm, dtype=torch.float32, device=dev))
 
-                st_b = torch.stack(sb); vm_b = torch.stack(vmb)
-                logits, vals = policy(st_b, vm_b)
+                st_b = torch.stack(sb); sct_b = torch.stack(scb); vm_b = torch.stack(vmb)
+                logits, vals = policy(st_b, sct_b, vm_b)
                 probs = F.softmax(logits, dim=-1).clamp(min=1e-8)
                 dist = torch.distributions.Categorical(probs)
                 actions = dist.sample(); lps = dist.log_prob(actions)
@@ -86,16 +87,16 @@ class DLELPMethod(BaseMethod):
                 if step == L - 1:
                     rewards = compute_ep_reward(sim_mastery_b, tgts_b, es_b, batch_size)
 
-                all_s.append(st_b); all_a.append(actions); all_lp.append(lps)
-                all_v.append(vals); all_vm.append(vm_b); all_rew.append(rewards)
+                all_s.append(st_b); all_sc.append(sct_b); all_a.append(actions)
+                all_lp.append(lps); all_v.append(vals); all_vm.append(vm_b); all_rew.append(rewards)
 
-            # Standard PPO update (no S-Agent during training, no masking)
             G = np.zeros(batch_size, dtype=np.float32); rets = [None] * L
             for t in reversed(range(L)): G = all_rew[t] + gamma * G; rets[t] = G.copy()
-            st = torch.cat(all_s); at = torch.cat(all_a); olp = torch.cat(all_lp).detach()
+            st = torch.cat(all_s); sct = torch.cat(all_sc); at = torch.cat(all_a)
+            olp = torch.cat(all_lp).detach()
             ret = torch.tensor(np.concatenate(rets), dtype=torch.float32, device=dev)
             ov = torch.cat(all_v).detach(); vm_t = torch.cat(all_vm)
-            run_ppo_epoch(policy, st, at, olp, ret, ov, vm_t, opt, clip, ent_coef)
+            run_ppo_epoch(policy, st, at, olp, ret, ov, vm_t, opt, clip, ent_coef, critic_states=sct)
             sched.step()
 
             if (ep_i + 1) % 5 == 0:

@@ -48,19 +48,21 @@ class CSEALMethod(BaseMethod):
 
             all_lp, all_v, all_ent, all_rew = [], [], [], []
             for step in range(L):
-                sb, vmb = [], []
+                sb, scb, vmb = [], [], []
                 for i in range(batch_size):
                     s = torch.tensor(make_state_standard(init_mastery_b[i], tgts_b[i], step, L, NC),
                                      dtype=torch.float32, device=dev)
+                    sc = torch.tensor(make_state_standard(sim_mastery_b[i], tgts_b[i], step, L, NC),
+                                      dtype=torch.float32, device=dev)
                     vm = torch.zeros(NC, device=dev)
                     for c in cands_b[i]:
                         if c not in used_b[i]: vm[c] = 1.0
                     if vm.sum() == 0:
                         for c in range(NC):
                             if c not in used_b[i]: vm[c] = 1.0
-                    sb.append(s); vmb.append(vm)
-                st_b = torch.stack(sb); vm_b = torch.stack(vmb)
-                logits, vals = policy(st_b, vm_b)
+                    sb.append(s); scb.append(sc); vmb.append(vm)
+                st_b = torch.stack(sb); sct_b = torch.stack(scb); vm_b = torch.stack(vmb)
+                logits, vals = policy(st_b, sct_b, vm_b)
                 probs = F.softmax(logits, dim=-1).clamp(min=1e-8)
                 dist = torch.distributions.Categorical(probs)
                 actions = dist.sample(); lps = dist.log_prob(actions); ent = dist.entropy()

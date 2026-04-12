@@ -82,22 +82,34 @@ class BaseMethod(ABC):
 
 
 class PolicyNet(nn.Module):
-    """Standard MLP actor-critic. State → (logits, value)."""
+    """Asymmetric actor-critic. Actor sees h0, Critic sees ht (privileged).
+    forward(s_actor, s_critic=None, valid_mask=None)
+    - s_actor: state with initial mastery (h0) — used by policy head
+    - s_critic: state with current mastery (ht) — used by value head (training only)
+    - If s_critic is None, uses s_actor for both (symmetric mode)
+    """
     def __init__(self, state_dim: int, n_actions: int, hidden: int):
         super().__init__()
-        self.net = nn.Sequential(
+        self.actor_net = nn.Sequential(
+            nn.Linear(state_dim, hidden), nn.ReLU(),
+            nn.Linear(hidden, hidden), nn.ReLU(),
+        )
+        self.critic_net = nn.Sequential(
             nn.Linear(state_dim, hidden), nn.ReLU(),
             nn.Linear(hidden, hidden), nn.ReLU(),
         )
         self.pi = nn.Linear(hidden, n_actions)
         self.v = nn.Linear(hidden, 1)
 
-    def forward(self, s, valid_mask=None):
-        h = self.net(s)
-        logits = self.pi(h)
+    def forward(self, s_actor, s_critic=None, valid_mask=None):
+        if s_critic is None:
+            s_critic = s_actor
+        h_a = self.actor_net(s_actor)
+        h_c = self.critic_net(s_critic)
+        logits = self.pi(h_a)
         if valid_mask is not None:
             logits = logits + (1 - valid_mask) * (-1e9)
-        return logits, self.v(h).squeeze(-1)
+        return logits, self.v(h_c).squeeze(-1)
 
 
 def make_state_standard(mastery: np.ndarray, targets: List[int],
@@ -118,12 +130,12 @@ def make_state_dlelp(mastery: np.ndarray, targets: List[int], num_c: int) -> np.
 
 
 def run_ppo_epoch(policy, states, actions, old_lps, returns, values, vmasks,
-                  optimizer, clip_eps, ent_coef, n_epochs=4):
-    """Standard PPO update. Shared by EvoLearning, PPO-vanilla, DLELP, GEHRL, KnowLP."""
+                  optimizer, clip_eps, ent_coef, n_epochs=4, critic_states=None):
+    """Asymmetric PPO update. critic_states uses ht (privileged), states uses h0."""
     adv = returns - values.detach()
     adv = (adv - adv.mean()) / (adv.std() + 1e-8)
     for _ in range(n_epochs):
-        logits, vals = policy(states, vmasks)
+        logits, vals = policy(states, critic_states, vmasks)
         probs = F.softmax(logits, dim=-1).clamp(min=1e-8)
         dist = torch.distributions.Categorical(probs)
         nlp = dist.log_prob(actions)
