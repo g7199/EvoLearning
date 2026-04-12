@@ -167,13 +167,11 @@ where $\mathcal{S}$ is the currently selected set, $\text{sim}(\mathbf{p}, \math
 
 \subsection{Stage 2: Behavioral Cloning}
 
-The evolutionary expert trajectories provide state--action pairs for supervised learning. For each expert $(\mathbf{h}_0, \mathcal{G}, \mathbf{p}, \text{EP})$, we construct $L$ training examples:
+The evolutionary expert trajectories provide state--action pairs for supervised learning. For each expert $(\mathbf{h}_0, \mathcal{G}, \mathbf{p}, \text{EP}, \mathcal{H})$, we simulate the path through the KES to obtain per-step mastery vectors, constructing $L$ training examples:
 \begin{equation}
-    \{(\mathbf{s}_t, a_t)\}_{t=0}^{L-1}, \quad \mathbf{s}_t = [\mathbf{h}_0 \| \mathbf{g} \| t/L]
+    \{(\mathbf{s}_t, a_t)\}_{t=0}^{L-1}, \quad \mathbf{s}_t = [\mathbf{h}_t \| \mathbf{g} \| t/L]
 \end{equation}
-where $\mathbf{g} \in \{0,1\}^M$ is the target mask and $a_t = p_t$ is the expert's action at step $t$.
-
-\paragraph{State design note.} The BC state uses the \emph{initial} mastery $\mathbf{h}_0$ (fixed across all steps), whereas PPO uses the \emph{current} mastery $\mathbf{h}_t$ (updated after each KES interaction). This simplification avoids $L$ KES calls per expert per BC epoch, which would be prohibitively expensive for large expert sets. The step index $t/L$ provides the policy with positional information to compensate for the static mastery. Crucially, the PPO stage trains on the policy's own state distribution with live KES feedback, correcting any mismatch introduced by this approximation.
+where $\mathbf{h}_t$ is the learner's mastery after executing the first $t$ actions of the expert path in the KES, $\mathbf{g} \in \{0,1\}^M$ is the target mask, and $a_t = p_t$ is the expert's action at step $t$. Using the per-step mastery $\mathbf{h}_t$ rather than the initial mastery $\mathbf{h}_0$ ensures that the BC training distribution matches the PPO fine-tuning and inference distributions, where the policy observes updated mastery at each step.
 
 The policy $\pi_\theta$ is trained to minimize the cross-entropy loss:
 \begin{equation}
