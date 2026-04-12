@@ -167,11 +167,11 @@ where $\mathcal{S}$ is the currently selected set, $\text{sim}(\mathbf{p}, \math
 
 \subsection{Stage 2: Behavioral Cloning}
 
-The evolutionary expert trajectories provide state--action pairs for supervised learning. For each expert $(\mathbf{h}_0, \mathcal{G}, \mathbf{p}, \text{EP}, \mathcal{H})$, we simulate the path through the KES to obtain per-step mastery vectors, constructing $L$ training examples:
+The evolutionary expert trajectories provide state--action pairs for supervised learning. Consistent with the simulator-free actor design (Section~4.3), the BC state uses the \emph{initial} mastery $\mathbf{h}_0$, ensuring the actor never depends on KES feedback---not during BC training, PPO fine-tuning, or inference. For each expert $(\mathbf{h}_0, \mathcal{G}, \mathbf{p}, \text{EP})$, we construct $L$ training examples:
 \begin{equation}
-    \{(\mathbf{s}_t, a_t)\}_{t=0}^{L-1}, \quad \mathbf{s}_t = [\mathbf{h}_t \| \mathbf{g} \| t/L]
+    \{(\mathbf{s}_t, a_t)\}_{t=0}^{L-1}, \quad \mathbf{s}_t = [\mathbf{h}_0 \| \mathbf{g} \| t/L]
 \end{equation}
-where $\mathbf{h}_t$ is the learner's mastery after executing the first $t$ actions of the expert path in the KES, $\mathbf{g} \in \{0,1\}^M$ is the target mask, and $a_t = p_t$ is the expert's action at step $t$. Using the per-step mastery $\mathbf{h}_t$ rather than the initial mastery $\mathbf{h}_0$ ensures that the BC training distribution matches the PPO fine-tuning and inference distributions, where the policy observes updated mastery at each step.
+where $\mathbf{g} \in \{0,1\}^M$ is the target mask, $t/L$ provides step position, and $a_t = p_t$ is the expert's action at step $t$. The step index and the used-concept exclusion mask (applied during action selection) are the only signals that differentiate steps---the actor learns to plan an entire path from the initial knowledge state alone.
 
 The policy $\pi_\theta$ is trained to minimize the cross-entropy loss:
 \begin{equation}
@@ -184,7 +184,7 @@ Starting from the BC-initialized policy, we apply PPO~\cite{schulman2017ppo} for
 
 \paragraph{Simulator-Free Inference via Asymmetric Actor-Critic.}
 
-A critical design consideration in KES-based LPR is whether the policy may access the simulator at inference time. As noted by Lee et al.~\cite{lee2024privileged}, the simulator's internal knowledge state is unavailable in real deployment---a tutoring system cannot observe how a student's mastery evolves \emph{before} they actually practice. Relying on per-step simulator feedback during inference is akin to planning a study schedule while already knowing the exam answers.
+A critical design consideration in KES-based LPR is whether the policy may access the simulator at inference time. As noted by Lee et al.~\cite{li2024privileged}, the simulator's internal knowledge state is unavailable in real deployment---a tutoring system cannot observe how a student's mastery evolves \emph{before} they actually practice. Relying on per-step simulator feedback during inference is akin to planning a study schedule while already knowing the exam answers.
 
 We address this through an \emph{asymmetric actor-critic} architecture. The \textbf{actor} (policy) receives only the \emph{initial} mastery $\mathbf{h}_0$ at every step, ensuring KES-free inference:
 \begin{equation}
@@ -526,10 +526,10 @@ A.~Nair, B.~McGrew, M.~Andrychowicz, W.~Zaremba, and P.~Abbeel.
 \newblock Overcoming exploration in reinforcement learning with demonstrations.
 \newblock In \emph{IEEE International Conference on Robotics and Automation (ICRA)}, pages 6292--6299, 2018.
 
-\bibitem{lee2024privileged}
-S.~Lee, J.~Park, and H.~Kim.
+\bibitem{li2024privileged}
+Q.~Li, W.~Xia, L.~Yin, J.~Jin, and Y.~Yu.
 \newblock Privileged knowledge state distillation for reinforcement learning-based educational path recommendation.
-\newblock In \emph{Proceedings of the International Conference on Educational Data Mining (EDM)}, 2024.
+\newblock In \emph{Proceedings of the 30th ACM SIGKDD Conference on Knowledge Discovery and Data Mining (KDD)}, 2024.
 
 \end{thebibliography}
 
