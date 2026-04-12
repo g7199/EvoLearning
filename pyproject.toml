@@ -19,6 +19,9 @@ dependencies = [
 llm = ["openai>=1.0", "anthropic>=0.30"]
 dev = ["pytest>=7.4"]
 
+[tool.setuptools.packages.find]
+include = ["simpath*"]
+
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
