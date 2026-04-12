@@ -40,23 +40,26 @@ def download_assist09():
 
     os.makedirs(dest_dir, exist_ok=True)
 
-    try:
-        import gdown
-        # ASSISTments 2009-2010 skill_builder_data_corrected.csv
-        file_id = "1NNXHFRxcAVURFRacMHoNEZPMxgbLpMnS"
-        url = f"https://drive.google.com/uc?id={file_id}"
-        print(f"  Downloading from Google Drive...")
-        gdown.download(url, dest_file, quiet=False)
+    # Try multiple sources
+    urls = [
+        "https://raw.githubusercontent.com/hcnoh/knowledge-tracing-collection-pytorch/master/data/ASSISTments2009/skill_builder_data_corrected.csv",
+        "https://raw.githubusercontent.com/theophilee/learner-performance-prediction/master/data/assistments09/skill_builder_data_corrected.csv",
+    ]
 
-        if os.path.exists(dest_file):
-            print(f"  Saved: {dest_file} ({os.path.getsize(dest_file) / 1e6:.1f} MB)")
-            return True
-        else:
-            print(f"  Download failed. Try manual download:")
-    except ImportError:
-        print(f"  gdown not installed. Run: pip install gdown")
-        print(f"  Or manual download:")
+    for url in urls:
+        try:
+            print(f"  Downloading...")
+            urllib.request.urlretrieve(url, dest_file)
+            if os.path.exists(dest_file) and os.path.getsize(dest_file) > 1e6:
+                print(f"  Saved: {dest_file} ({os.path.getsize(dest_file) / 1e6:.1f} MB)")
+                return True
+            else:
+                os.remove(dest_file)
+        except Exception as e:
+            print(f"  Source failed: {e}")
+            continue
 
+    print(f"  Auto-download failed. Manual download:")
     print(f"  1. Go to: https://sites.google.com/site/assistmentsdata/home/assistment-2009-2010-data")
     print(f"  2. Download 'skill_builder_data_corrected.csv'")
     print(f"  3. Place it in: {dest_dir}/")
