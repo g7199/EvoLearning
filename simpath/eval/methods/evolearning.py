@@ -27,19 +27,13 @@ class EvoLearningMethod(BaseMethod):
         policy = self.policy
         NC = self.num_c; L = self.L; dev = self.device
 
-        # ═══ Stage 1: BC on expert trajectories (ht: per-step mastery) ═══
-        print(f"  [{self.name}] BC on {len(experts)} experts (ht mastery)...", flush=True)
+        # ═══ Stage 1: BC on expert trajectories (h0: initial mastery) ═══
+        print(f"  [{self.name}] BC on {len(experts)} experts...", flush=True)
         bc_s, bc_a = [], []
-        for ei, (mastery, tgts, path, ep, hc, hr) in enumerate(experts):
-            sc, sr = list(hc), list(hr)
-            cur_m = kes.mastery(sc, sr)
+        for mastery, tgts, path, ep, *_ in experts:
             for step, action in enumerate(path[:L]):
-                bc_s.append(make_state_standard(cur_m, tgts, step, L, NC))
+                bc_s.append(make_state_standard(mastery, tgts, step, L, NC))
                 bc_a.append(action)
-                sc.append(action); sr.append(1 if cur_m[action] > 0.5 else 0)
-                cur_m = kes.mastery(sc, sr)
-            if (ei + 1) % 1000 == 0:
-                print(f"    BC prep: {ei+1}/{len(experts)}", flush=True)
         bc_s_t = torch.tensor(np.array(bc_s), dtype=torch.float32, device=dev)
         bc_a_t = torch.tensor(bc_a, dtype=torch.long, device=dev)
         bc_opt = torch.optim.Adam(policy.parameters(), lr=1e-3, weight_decay=1e-4)
@@ -83,17 +77,18 @@ class EvoLearningMethod(BaseMethod):
             indices = np.random.randint(0, len(train_data), size=batch_size)
             batch = [train_data[i] for i in indices]
             hc_b = [s[0] for s in batch]; hr_b = [s[1] for s in batch]; tgts_b = [s[2] for s in batch]
-            mastery_b = kes.batch_mastery(hc_b, hr_b)
-            es_b = [mastery_b[i][tgts_b[i]].copy() for i in range(batch_size)]
+            init_mastery_b = kes.batch_mastery(hc_b, hr_b)
+            es_b = [init_mastery_b[i][tgts_b[i]].copy() for i in range(batch_size)]
             sc_b = [list(hc_b[i]) for i in range(batch_size)]
             sr_b = [list(hr_b[i]) for i in range(batch_size)]
+            sim_mastery_b = init_mastery_b.copy()
             used_b = [set() for _ in range(batch_size)]
             all_s, all_a, all_lp, all_v, all_vm, all_rew = [], [], [], [], [], []
 
             for step in range(L):
                 sb, vmb = [], []
                 for i in range(batch_size):
-                    s = torch.tensor(make_state_standard(mastery_b[i], tgts_b[i], step, L, NC),
+                    s = torch.tensor(make_state_standard(init_mastery_b[i], tgts_b[i], step, L, NC),
                                      dtype=torch.float32, device=dev)
                     vm = torch.ones(NC, device=dev)
                     for c in used_b[i]: vm[c] = 0
@@ -106,11 +101,11 @@ class EvoLearningMethod(BaseMethod):
                 anp = actions.cpu().numpy()
                 for i in range(batch_size):
                     a = anp[i]; sc_b[i].append(a)
-                    sr_b[i].append(1 if mastery_b[i][a] > 0.5 else 0); used_b[i].add(a)
-                mastery_b = kes.batch_mastery(sc_b, sr_b)
+                    sr_b[i].append(1 if sim_mastery_b[i][a] > 0.5 else 0); used_b[i].add(a)
+                sim_mastery_b = kes.batch_mastery(sc_b, sr_b)
                 rewards = np.zeros(batch_size, dtype=np.float32)
                 if step == L - 1:
-                    rewards = compute_ep_reward(mastery_b, tgts_b, es_b, batch_size)
+                    rewards = compute_ep_reward(sim_mastery_b, tgts_b, es_b, batch_size)
                 all_s.append(st_b); all_a.append(actions); all_lp.append(lps)
                 all_v.append(vals); all_vm.append(vm_b); all_rew.append(rewards)
 
@@ -146,19 +141,13 @@ class EvoLearningMethod(BaseMethod):
     def predict(self, mastery, targets, kes=None, hc=None, hr=None):
         self.policy.eval()
         path, used = [], set()
-        cur_m = mastery
-        sc = list(hc) if hc else []
-        sr = list(hr) if hr else []
         for step in range(self.L):
-            s = torch.tensor(make_state_standard(cur_m, targets, step, self.L, self.num_c),
+            s = torch.tensor(make_state_standard(mastery, targets, step, self.L, self.num_c),
                              dtype=torch.float32, device=self.device)
             vm = torch.ones(self.num_c, device=self.device)
             for c in used: vm[c] = 0
             with torch.no_grad(): lo, _ = self.policy(s, vm)
             a = lo.argmax().item(); path.append(a); used.add(a)
-            if kes is not None:
-                sc.append(a); sr.append(1 if cur_m[a] > 0.5 else 0)
-                cur_m = kes.mastery(sc, sr)
         return path
 
     def save(self, path):

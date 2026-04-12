@@ -93,9 +93,10 @@ class GEHRLMethod(BaseMethod):
             indices = np.random.randint(0, len(train_data), size=batch_size)
             batch = [train_data[i] for i in indices]
             hc_b = [s[0] for s in batch]; hr_b = [s[1] for s in batch]; tgts_b = [s[2] for s in batch]
-            mastery_b = kes.batch_mastery(hc_b, hr_b)
-            es_b = [mastery_b[i][tgts_b[i]].copy() for i in range(batch_size)]
+            init_mastery_b = kes.batch_mastery(hc_b, hr_b)
+            es_b = [init_mastery_b[i][tgts_b[i]].copy() for i in range(batch_size)]
             sc_b = [list(hc_b[i]) for i in range(batch_size)]
+            sim_mastery_b = init_mastery_b.copy()
             sr_b = [list(hr_b[i]) for i in range(batch_size)]
             used_b = [set() for _ in range(batch_size)]
 
@@ -113,9 +114,9 @@ class GEHRLMethod(BaseMethod):
                 # High-level
                 hs, hvm = [], []
                 for i in range(batch_size):
-                    tm = mastery_b[i][tgts_pad[i]]
+                    tm = init_mastery_b[i][tgts_pad[i]]
                     tg = 1.0 - tm
-                    hs.append(torch.tensor(np.concatenate([mastery_b[i], tm, tg, [step/L]]),
+                    hs.append(torch.tensor(np.concatenate([init_mastery_b[i], tm, tg, [step/L]]),
                                            dtype=torch.float32, device=dev))
                     hvm.append(torch.tensor(tgts_mask[i], dtype=torch.float32, device=dev))
                 hs_b = torch.stack(hs); hvm_b = torch.stack(hvm)
@@ -131,9 +132,9 @@ class GEHRLMethod(BaseMethod):
                 ls, lvm = [], []
                 for i in range(batch_size):
                     goh = np.zeros(NC, dtype=np.float32); goh[goals[i]] = 1.0
-                    ls.append(torch.tensor(np.concatenate([mastery_b[i], goh, [step/L]]),
+                    ls.append(torch.tensor(np.concatenate([init_mastery_b[i], goh, [step/L]]),
                                            dtype=torch.float32, device=dev))
-                    cands = get_goal_candidates(goals[i], mastery_b[i], graph, NC, used_b[i], cap=20)
+                    cands = get_goal_candidates(goals[i], init_mastery_b[i], graph, NC, used_b[i], cap=20)
                     vm = np.zeros(NC, dtype=np.float32)
                     for c in cands: vm[c] = 1.0
                     if vm.sum() == 0:
@@ -147,18 +148,18 @@ class GEHRLMethod(BaseMethod):
                 l_a = l_d.sample(); l_lp = l_d.log_prob(l_a)
 
                 anp = l_a.cpu().numpy()
-                old_m = mastery_b.copy()
+                old_m = sim_mastery_b.copy()
                 for i in range(batch_size):
                     a = anp[i]; sc_b[i].append(a)
-                    sr_b[i].append(1 if mastery_b[i][a] > 0.5 else 0); used_b[i].add(a)
-                mastery_b = kes.batch_mastery(sc_b, sr_b)
+                    sr_b[i].append(1 if sim_mastery_b[i][a] > 0.5 else 0); used_b[i].add(a)
+                sim_mastery_b = kes.batch_mastery(sc_b, sr_b)
 
                 # Test-based internal reward (low-level)
-                lr_arr = np.array([mastery_b[i][goals[i]] - old_m[i][goals[i]] for i in range(batch_size)])
+                lr_arr = np.array([sim_mastery_b[i][goals[i]] - old_m[i][goals[i]] for i in range(batch_size)])
                 # External reward (high-level)
                 hr_arr = np.zeros(batch_size, dtype=np.float32)
                 if step == L - 1:
-                    hr_arr = compute_ep_reward(mastery_b, tgts_b, es_b, batch_size)
+                    hr_arr = compute_ep_reward(sim_mastery_b, tgts_b, es_b, batch_size)
 
                 ah_s.append(hs_b); ah_a.append(h_a); ah_lp.append(h_lp)
                 ah_v.append(h_v); ah_vm.append(hvm_b); ah_rew.append(hr_arr)
@@ -203,21 +204,18 @@ class GEHRLMethod(BaseMethod):
         nt = min(len(targets), MAX_TARGETS)
         tgts_pad[:nt] = targets[:nt]; tgts_m[:nt] = 1.0
         path, used = [], set()
-        cur_m = mastery
-        sc = list(hc) if hc else []
-        sr = list(hr) if hr else []
         for step in range(L):
-            tm = cur_m[tgts_pad]; tg = 1.0 - tm
-            hs = torch.tensor(np.concatenate([cur_m, tm, tg, [step/L]]),
+            tm = mastery[tgts_pad]; tg = 1.0 - tm
+            hs = torch.tensor(np.concatenate([mastery, tm, tg, [step/L]]),
                               dtype=torch.float32, device=dev)
             hvm = torch.tensor(tgts_m, dtype=torch.float32, device=dev)
             with torch.no_grad(): h_lo, _ = self.high(hs, hvm)
             gi = h_lo.argmax().item()
             goal = tgts_pad[min(gi, nt - 1)]
             goh = np.zeros(NC, dtype=np.float32); goh[goal] = 1.0
-            ls = torch.tensor(np.concatenate([cur_m, goh, [step/L]]),
+            ls = torch.tensor(np.concatenate([mastery, goh, [step/L]]),
                               dtype=torch.float32, device=dev)
-            cands = get_goal_candidates(goal, cur_m, self.graph, NC, used, cap=20)
+            cands = get_goal_candidates(goal, mastery, self.graph, NC, used, cap=20)
             vm = np.zeros(NC, dtype=np.float32)
             for c in cands: vm[c] = 1.0
             if vm.sum() == 0:
@@ -226,9 +224,6 @@ class GEHRLMethod(BaseMethod):
             lvm = torch.tensor(vm, dtype=torch.float32, device=dev)
             with torch.no_grad(): l_lo, _ = self.low(ls, lvm)
             a = l_lo.argmax().item(); path.append(a); used.add(a)
-            if kes is not None:
-                sc.append(a); sr.append(1 if cur_m[a] > 0.5 else 0)
-                cur_m = kes.mastery(sc, sr)
         return path
 
     def save(self, path):

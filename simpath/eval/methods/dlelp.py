@@ -51,9 +51,10 @@ class DLELPMethod(BaseMethod):
             indices = np.random.randint(0, len(train_data), size=batch_size)
             batch = [train_data[i] for i in indices]
             hc_b = [s[0] for s in batch]; hr_b = [s[1] for s in batch]; tgts_b = [s[2] for s in batch]
-            mastery_b = kes.batch_mastery(hc_b, hr_b)
-            es_b = [mastery_b[i][tgts_b[i]].copy() for i in range(batch_size)]
+            init_mastery_b = kes.batch_mastery(hc_b, hr_b)
+            es_b = [init_mastery_b[i][tgts_b[i]].copy() for i in range(batch_size)]
             sc_b = [list(hc_b[i]) for i in range(batch_size)]
+            sim_mastery_b = init_mastery_b.copy()
             sr_b = [list(hr_b[i]) for i in range(batch_size)]
             used_b = [set() for _ in range(batch_size)]
 
@@ -62,7 +63,7 @@ class DLELPMethod(BaseMethod):
             for step in range(L):
                 sb, vmb = [], []
                 for i in range(batch_size):
-                    state = make_state_dlelp(mastery_b[i], tgts_b[i], NC)
+                    state = make_state_dlelp(init_mastery_b[i], tgts_b[i], NC)
                     # Paper: softmax over ALL concepts, only exclude used
                     vm = np.ones(NC, dtype=np.float32)
                     for c in used_b[i]: vm[c] = 0
@@ -78,12 +79,12 @@ class DLELPMethod(BaseMethod):
 
                 for i in range(batch_size):
                     a = anp[i]; sc_b[i].append(a)
-                    sr_b[i].append(1 if mastery_b[i][a] > 0.5 else 0); used_b[i].add(a)
-                mastery_b = kes.batch_mastery(sc_b, sr_b)
+                    sr_b[i].append(1 if sim_mastery_b[i][a] > 0.5 else 0); used_b[i].add(a)
+                sim_mastery_b = kes.batch_mastery(sc_b, sr_b)
 
                 rewards = np.zeros(batch_size, dtype=np.float32)
                 if step == L - 1:
-                    rewards = compute_ep_reward(mastery_b, tgts_b, es_b, batch_size)
+                    rewards = compute_ep_reward(sim_mastery_b, tgts_b, es_b, batch_size)
 
                 all_s.append(st_b); all_a.append(actions); all_lp.append(lps)
                 all_v.append(vals); all_vm.append(vm_b); all_rew.append(rewards)
@@ -119,31 +120,24 @@ class DLELPMethod(BaseMethod):
         print(f"  [{self.name}] Best Val = {bv:+.4f}")
 
     def predict(self, mastery, targets, kes=None, hc=None, hr=None):
-        """Inference with S-Agent: plateau → insert similar, skip P-Agent that step."""
+        """Inference with S-Agent (h0 mode: no KES during path generation)."""
         self.policy.eval()
         path, used = [], set()
-        cur_m = mastery.copy()
-        prev_m = None
-        sc = list(hc) if hc else []
-        sr = list(hr) if hr else []
         for step in range(self.L):
             if len(path) >= self.L:
                 break
 
-            # S-Agent: check plateau on previous concept (inference only)
+            # S-Agent: check plateau based on initial mastery
             s_agent_fired = False
-            if step > 0 and prev_m is not None and len(path) > 0:
+            if step > 0 and len(path) > 0:
                 last_c = path[-1]
-                if (cur_m[last_c] - prev_m[last_c]) < S_THRESHOLD:
+                if mastery[last_c] < 0.5 + S_THRESHOLD:
                     sims = self.graph.get_similar(last_c, top_k=10)
                     for s in sims:
-                        if s not in used and cur_m[s] < 0.7:
+                        if s not in used and mastery[s] < 0.7:
                             path.append(s)
                             used.add(s)
                             s_agent_fired = True
-                            if kes is not None:
-                                sc.append(s); sr.append(1 if cur_m[s] > 0.5 else 0)
-                                cur_m = kes.mastery(sc, sr)
                             break
 
             if s_agent_fired:
@@ -153,8 +147,7 @@ class DLELPMethod(BaseMethod):
                 break
 
             # P-Agent: softmax over all concepts (only exclude used)
-            prev_m = cur_m.copy()
-            state = make_state_dlelp(cur_m, targets, self.num_c)
+            state = make_state_dlelp(mastery, targets, self.num_c)
             vm = np.ones(self.num_c, dtype=np.float32)
             for c in used: vm[c] = 0
             s_t = torch.tensor(state, dtype=torch.float32, device=self.device)
@@ -164,9 +157,6 @@ class DLELPMethod(BaseMethod):
             a = lo.argmax().item()
             path.append(a)
             used.add(a)
-            if kes is not None:
-                sc.append(a); sr.append(1 if cur_m[a] > 0.5 else 0)
-                cur_m = kes.mastery(sc, sr)
         return path[:self.L]
 
     def save(self, path):
