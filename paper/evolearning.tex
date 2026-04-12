@@ -8,6 +8,7 @@
 \usepackage{xcolor}
 \usepackage{graphicx}
 \usepackage{subcaption}
+\usepackage{float}
 \usepackage{enumitem}
 
 \newcommand{\ours}{\textsc{EvoLearning}}
@@ -212,7 +213,7 @@ where $\rho_t = \pi_\theta(a_t|\mathbf{s}_t^{\text{actor}}) / \pi_{\theta_{\text
     \mathcal{L} = \mathcal{L}_{\ppo} + c_v \cdot \mathcal{L}_{\text{value}} - c_e \cdot H[\pi_\theta]
 \end{equation}
 
-\begin{figure*}[t]
+\begin{figure*}[H]
     \centering
     % Placeholder for framework figure
     \fbox{\parbox{0.95\textwidth}{\centering\vspace{3cm}\textbf{Figure placeholder:} EvoLearning three-stage pipeline\\[1em]
