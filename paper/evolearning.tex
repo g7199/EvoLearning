@@ -36,7 +36,7 @@
 \email{anonymous@anonymous.org}
 
 \begin{abstract}
-Personalized learning path recommendation (LPR) aims to identify an optimal sequence of knowledge concepts that maximizes a learner's mastery improvement. Reinforcement learning (RL) approaches interact with knowledge evolution simulators to learn recommendation policies, but face a fundamental \emph{search space explosion}: for $M$ concepts and path length $L$, the space of possible paths grows combinatorially, reaching $10^{38}$ for typical curricula with $L=20$. Randomly initialized policies cannot efficiently explore this space under sparse rewards. We propose \ours{}, a three-stage framework that tames this combinatorial challenge through \emph{evolutionary pre-exploration}. First, an evolutionary algorithm with diversity-regularized selection generates high-quality, diverse expert trajectories for each learner. Second, these trajectories are distilled into a neural policy via behavioral cloning (BC), compressing per-instance search results into a generalizable model. Third, proximal policy optimization (PPO) fine-tunes the policy through online interaction, discovering improvements beyond the evolutionary ceiling. Experiments on two real-world datasets (ASSISTments 2009 and Junyi Academy) with 10 baselines demonstrate that \ours{} achieves state-of-the-art effectiveness percentage (EP) scores and converges up to $7\times$ faster than vanilla PPO.
+In simulator-based sequential recommendation, a learned user model enables offline policy optimization for multi-step recommendation sequences. Learning path recommendation (LPR)---recommending an ordered sequence of knowledge concepts to maximize a learner's mastery---is a prominent instance where the \emph{order} of recommendations critically determines outcomes. However, reinforcement learning (RL) approaches to LPR face a \emph{search space explosion}: the number of possible paths grows combinatorially with sequence length, reaching $10^{38}$ for typical curricula with $L=20$ steps, while rewards are sparse and available only at the sequence end. We propose \ours{}, a three-stage framework that addresses this via \emph{evolutionary pre-exploration}. First, an evolutionary algorithm with diversity-regularized selection synthesizes high-quality expert trajectories per learner---filling the critical gap that expert demonstrations do not naturally exist in educational data. Second, behavioral cloning (BC) compresses these per-instance solutions into a generalizable policy. Third, proximal policy optimization (PPO) fine-tunes beyond the evolutionary ceiling through online interaction. Experiments on two real-world datasets with 10 baselines demonstrate state-of-the-art effectiveness and up to $7\times$ faster convergence than vanilla PPO. The evolutionary pre-exploration paradigm generalizes to any simulator-augmented sequential recommendation setting where per-user optimal sequences differ and sequence length makes exhaustive search intractable.
 \end{abstract}
 
 \begin{CCSXML}
@@ -49,7 +49,7 @@ Personalized learning path recommendation (LPR) aims to identify an optimal sequ
 \ccsdesc[500]{Information systems~Recommender systems}
 \ccsdesc[500]{Computing methodologies~Reinforcement learning}
 
-\keywords{Learning Path Recommendation, Reinforcement Learning, Evolutionary Algorithms, Knowledge Tracing, Behavioral Cloning}
+\keywords{Sequential Recommendation, Learning Path Recommendation, Reinforcement Learning, Evolutionary Algorithms, Behavioral Cloning, Simulator-based Recommendation}
 
 \maketitle
 
@@ -77,9 +77,10 @@ We propose \ours{}, a framework that resolves this demonstration gap through \em
 
 Our main contributions are:
 \begin{itemize}
-    \item We introduce \ours{}, a novel LPR framework that bridges evolutionary search and policy optimization through behavioral cloning, achieving state-of-the-art performance on standard benchmarks.
-    \item We propose a DPP-based diverse expert selection mechanism that prevents mode collapse in evolutionary trajectories and improves the quality of the BC initialization.
-    \item We conduct comprehensive experiments comparing 10 methods across 2 datasets, demonstrating that \ours{} significantly outperforms all baselines and converges up to $7\times$ faster than vanilla PPO.
+    \item We introduce \ours{}, a framework that addresses the demonstration gap in educational recommendation by automatically synthesizing expert trajectories via evolutionary search, then distilling them into a generalizable policy through BC$\to$PPO fine-tuning.
+    \item We propose a diversity-regularized expert selection mechanism that prevents mode collapse in evolutionary trajectories and improves BC coverage across diverse learner states.
+    \item We conduct comprehensive experiments comparing 10 methods across 2 datasets with path lengths $L \in \{5, 10, 20\}$, demonstrating state-of-the-art performance and up to $7\times$ faster convergence.
+    \item We identify three conditions---cheap simulator, combinatorial action space, per-instance heterogeneity---under which evolutionary pre-exploration is effective for simulator-based sequential recommendation, suggesting applicability beyond education to domains such as healthcare and finance.
 \end{itemize}
 
 %% ============================================================
@@ -345,21 +346,29 @@ A critical but subtle design choice is the DPP-based diverse expert selection (E
 
 DPP selection ensures that the $K$ trajectories per learner cover qualitatively different strategies (e.g., prerequisite-first vs.\ target-direct vs.\ ZPD-focused paths). This diversity in the training set acts as implicit regularization, producing a BC policy that generalizes across the state space rather than overfitting to one behavioral mode. We validate this in the ablation study (Table~\ref{tab:ablation}).
 
+\subsection{Generalizability Beyond Education}
+
+The evolutionary pre-exploration paradigm is not specific to education. We identify three conditions under which it is effective for \emph{simulator-augmented sequential recommendation}:
+\begin{enumerate}
+    \item \textbf{Cheap simulator.} A learned user model enables zero-cost trajectory evaluation, making per-instance evolutionary search tractable. In education, this is the KES (DKT); analogous simulators exist in healthcare (patient progression models) and finance (portfolio simulators).
+    \item \textbf{Combinatorial sequence space.} The recommendation sequence is long enough ($L \geq 5$) that exhaustive or random search fails. This distinguishes LPR from next-item recommendation, where a single prediction suffices.
+    \item \textbf{Per-user heterogeneity.} Optimal sequences differ across users, requiring personalized demonstrations rather than a single global expert policy. This is the norm in education (each learner has a unique knowledge state) and healthcare (each patient has a unique condition).
+\end{enumerate}
+When these conditions hold, evolutionary pre-exploration provides a principled way to synthesize expert demonstrations in domains where they cannot be collected from human experts, enabling the BC$\to$RL pipeline even without access to oracle policies.
+
 %% ============================================================
 \section{Conclusion}
 %% ============================================================
 
-We presented \ours{}, a three-stage framework for learning path recommendation that bridges evolutionary search and reinforcement learning through behavioral cloning. By generating diverse expert trajectories via evolutionary algorithms and distilling them into a neural policy, \ours{} provides a strong initialization for PPO fine-tuning that overcomes the cold-start exploration problem. Extensive experiments on two real-world datasets demonstrate state-of-the-art performance and significantly faster convergence compared to existing methods.
+We presented \ours{}, a framework for learning path recommendation that resolves the expert demonstration gap through evolutionary pre-exploration. By synthesizing diverse, high-quality trajectories per learner and distilling them into a neural policy via BC$\to$PPO, \ours{} reduces the effective search space from combinatorial to tractable, achieving state-of-the-art performance with significantly faster convergence. The underlying paradigm---evolutionary demonstration generation for simulator-based sequential recommendation---extends naturally to healthcare, finance, and other domains where per-user optimal sequences must be discovered without human expert supervision.
 
 \paragraph{Limitations and Future Work.}
 
-\textit{Computational cost.} The evolutionary expert generation requires $N_{\text{train}} \times N_{\text{pop}} \times N_{\text{gen}} \times L$ KES evaluations as a preprocessing step. On ASSISTments 2009 (921 learners), this takes approximately 70 minutes on a single GPU. However, this cost is (a)~\emph{amortized}---experts are generated once and reused across all BC training runs---and (b)~\emph{parallelizable}---per-learner searches are independent and can be distributed across GPUs. For datasets with $>$10K learners (e.g., Junyi), we observe linear scaling at $\sim$1 learner/second with batched GPU evaluation.
+\textit{Computational cost.} Evolutionary expert generation requires $N_{\text{train}} \times N_{\text{pop}} \times N_{\text{gen}} \times L$ KES evaluations as a preprocessing step ($\sim$70 minutes for 921 learners on a single GPU). This cost is amortized (generated once, reused across runs) and parallelizable (per-learner searches are independent).
 
-\textit{Candidate space sensitivity.} The evolutionary candidate set $\mathcal{C}$ relies on the concept graph structure (prerequisites, similarity) and ZPD heuristics. While our DKT-derived graph is data-driven rather than manually constructed, the candidate cap $C$ and ZPD threshold are hyperparameters. We leave systematic sensitivity analysis for future work.
+\textit{Candidate space sensitivity.} The candidate set $\mathcal{C}$ relies on data-driven graph structure and ZPD heuristics. Systematic sensitivity analysis across domains is left for future work.
 
-\textit{Broader applicability.} While we focus on educational LPR, the evolutionary pre-exploration paradigm generalizes to any \emph{simulator-augmented sequential recommendation} setting where (a)~a differentiable user model provides cheap trajectory evaluation, (b)~the recommendation sequence is long enough for search space explosion to matter, and (c)~per-user optimal sequences differ. Potential applications include personalized treatment planning in healthcare (where patient simulators exist), adaptive financial advising, and multi-step intervention design---any domain where the sequential nature of recommendations makes the ordering as important as the content.
-
-\textit{Future directions.} Extending \ours{} to multi-objective optimization (balancing mastery improvement with learner engagement and cognitive load), evaluating with human learners beyond simulation, and exploring online adaptation of the evolutionary experts as the policy improves are promising avenues.
+\textit{Future directions.} Multi-objective optimization (balancing mastery with engagement), evaluation with human learners, and online adaptation of evolutionary experts as the policy improves.
 
 %% ============================================================
 %% References
