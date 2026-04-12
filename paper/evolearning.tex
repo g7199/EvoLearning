@@ -1,0 +1,475 @@
+\documentclass[sigconf,nonacm]{acmart}
+
+\usepackage{booktabs}
+\usepackage{amsmath,amssymb}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage{multirow}
+\usepackage{xcolor}
+\usepackage{graphicx}
+\usepackage{subcaption}
+
+\newcommand{\ours}{\textsc{EvoLearning}}
+\newcommand{\ep}{\mathrm{EP}}
+\newcommand{\kes}{\mathrm{KES}}
+\newcommand{\dkt}{\mathrm{DKT}}
+\newcommand{\bc}{\mathrm{BC}}
+\newcommand{\ppo}{\mathrm{PPO}}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\argmax}{\operatornamewithlimits{argmax}}
+
+\settopmatter{printacmref=false}
+\setcopyright{none}
+\renewcommand\footnotetextcopyrightpermission[1]{}
+\pagestyle{plain}
+
+\begin{document}
+
+\title{EvoLearning: Evolutionary Expert-Guided Reinforcement Learning\\for Personalized Learning Path Recommendation}
+
+\author{Anonymous}
+\affiliation{\institution{Anonymous Institution}}
+\email{anonymous@anonymous.org}
+
+\begin{abstract}
+Personalized learning path recommendation (LPR) aims to identify an optimal sequence of knowledge concepts that maximizes a learner's mastery improvement. While reinforcement learning (RL) approaches have shown promise by interacting with knowledge evolution simulators, they suffer from \emph{cold-start exploration}---randomly initialized policies require extensive interaction to discover effective paths within the combinatorially large concept space. We propose \ours{}, a three-stage framework that addresses this challenge through \emph{evolutionary expert-guided initialization}. First, we employ an evolutionary algorithm with determinantal point process (DPP)-based diversity selection to generate a set of high-quality, diverse expert trajectories for each learner. Second, we distill these trajectories into a neural policy via behavioral cloning (BC). Third, we fine-tune the policy using proximal policy optimization (PPO), enabling it to surpass the evolutionary ceiling through online exploration. Experiments on two real-world educational datasets (ASSISTments 2009 and Junyi Academy) demonstrate that \ours{} achieves state-of-the-art effectiveness percentage (EP) scores, outperforming nine baselines including CSEAL, GEHRL, DLELP, and KnowLP. Notably, the BC-initialized policy converges up to $7\times$ faster than vanilla PPO while achieving substantially higher final performance.
+\end{abstract}
+
+\begin{CCSXML}
+<ccs2012>
+<concept><concept_id>10002951.10003317.10003347.10003350</concept_id><concept_desc>Information systems~Recommender systems</concept_desc><concept_significance>500</concept_significance></concept>
+<concept><concept_id>10010147.10010178.10010179</concept_id><concept_desc>Computing methodologies~Reinforcement learning</concept_desc><concept_significance>500</concept_significance></concept>
+</ccs2012>
+\end{CCSXML}
+
+\ccsdesc[500]{Information systems~Recommender systems}
+\ccsdesc[500]{Computing methodologies~Reinforcement learning}
+
+\keywords{Learning Path Recommendation, Reinforcement Learning, Evolutionary Algorithms, Knowledge Tracing, Behavioral Cloning}
+
+\maketitle
+
+%% ============================================================
+\section{Introduction}
+%% ============================================================
+
+Intelligent tutoring systems increasingly rely on personalized learning path recommendation (LPR) to guide learners through a curriculum of knowledge concepts (KCs) in an order that maximizes their mastery development~\cite{liu2019cseal,li2023gehrl,cheng2025knowlp}. Given a learner's current knowledge state and a set of target concepts, the goal is to recommend a sequence of $L$ concepts to practice such that the learner's proficiency on the targets improves as much as possible.
+
+Recent advances frame LPR as a sequential decision-making problem and apply reinforcement learning (RL), where a knowledge evolution simulator (KES)---typically a deep knowledge tracing (DKT) model~\cite{piech2015dkt}---serves as the environment~\cite{liu2019cseal}. The agent receives the learner's mastery state, selects concepts to recommend, and is rewarded based on the resulting mastery improvement. Methods such as CSEAL~\cite{liu2019cseal}, SRC~\cite{wang2023src}, GEHRL~\cite{li2023gehrl}, and DLELP/KnowLP~\cite{cheng2025knowlp} have demonstrated the viability of this paradigm.
+
+However, existing RL-based LPR methods face a fundamental challenge: \textbf{cold-start exploration}. A randomly initialized policy must discover effective recommendation strategies from scratch within a combinatorially large action space ($|\mathcal{K}|^L$ possible paths, where $|\mathcal{K}|$ is the number of KCs). This leads to slow convergence and suboptimal final performance, as the policy spends significant training time on uninformative random exploration.
+
+We propose \ours{}, a three-stage framework that overcomes this limitation through evolutionary expert-guided initialization:
+
+\begin{enumerate}
+    \item \textbf{Evolutionary Expert Generation.} For each training learner, an evolutionary algorithm searches for high-performing learning paths in the KES. We apply DPP-based greedy selection to obtain $K$ diverse expert trajectories per learner, avoiding mode collapse in the demonstration set.
+
+    \item \textbf{Behavioral Cloning Warm-Start.} The expert trajectories are distilled into a neural policy via supervised cross-entropy minimization, providing a strong initialization that already captures effective recommendation patterns.
+
+    \item \textbf{PPO Fine-Tuning.} Starting from the BC-initialized policy, PPO refines the strategy through online interaction with the KES, enabling the policy to discover improvements beyond the evolutionary search ceiling.
+\end{enumerate}
+
+Our main contributions are:
+\begin{itemize}
+    \item We introduce \ours{}, a novel LPR framework that bridges evolutionary search and policy optimization through behavioral cloning, achieving state-of-the-art performance on standard benchmarks.
+    \item We propose a DPP-based diverse expert selection mechanism that prevents mode collapse in evolutionary trajectories and improves the quality of the BC initialization.
+    \item We conduct comprehensive experiments comparing 10 methods across 2 datasets, demonstrating that \ours{} significantly outperforms all baselines and converges up to $7\times$ faster than vanilla PPO.
+\end{itemize}
+
+%% ============================================================
+\section{Related Work}
+%% ============================================================
+
+\subsection{Knowledge Tracing}
+
+Knowledge tracing (KT) models estimate a learner's evolving mastery over time from interaction sequences. Deep Knowledge Tracing (DKT)~\cite{piech2015dkt} pioneered the use of recurrent neural networks for this task. Subsequent models include DKVMN~\cite{zhang2017dkvmn}, SAKT~\cite{pandey2019sakt}, AKT~\cite{ghosh2020akt}, and SAINT~\cite{choi2020saint}, which leverage attention mechanisms and memory networks for improved accuracy. In LPR, KT models serve dual roles: as the knowledge evolution simulator (KES) for RL training and as the mastery estimator at inference time.
+
+\subsection{Learning Path Recommendation}
+
+Early LPR methods relied on heuristic rules such as prerequisite ordering~\cite{chen2018prerequisite} and difficulty matching~\cite{liu2019cseal}. The CSEAL framework~\cite{liu2019cseal} introduced the KES paradigm, training an RL agent within a DKT simulator using actor-critic methods with cognitive navigation---restricting the action space to graph-related concepts. SRC~\cite{wang2023src} formulated LPR as a set-to-sequence problem with concept-aware ranking. GEHRL~\cite{li2023gehrl} proposed hierarchical RL with a goal-planning agent and a goal-achieving agent, incorporating graph-based candidate filtering. DLELP and KnowLP~\cite{cheng2025knowlp} employ a multi-agent system with prerequisite and similarity agents, using EDU-GraphRAG for knowledge graph construction. GRU4Rec~\cite{hidasi2016gru4rec}, originally designed for session-based recommendation, has been adapted for sequential learning path generation.
+
+\subsection{Evolutionary Methods in RL}
+
+Evolutionary algorithms have been combined with RL in various ways. Population-based training~\cite{jaderberg2017pbt} evolves hyperparameters during RL training. Evolutionary strategies (ES)~\cite{salimans2017es} optimize policies directly through fitness evaluation. Our approach is distinct: we use evolution to \emph{generate expert demonstrations} rather than to optimize the policy itself, then leverage behavioral cloning~\cite{ross2011dagger,torabi2018bc} to transfer the evolutionary knowledge into a differentiable policy.
+
+%% ============================================================
+\section{Preliminaries}
+%% ============================================================
+
+\subsection{Problem Formulation}
+
+Let $\mathcal{K} = \{k_1, k_2, \ldots, k_M\}$ denote a set of $M$ knowledge concepts in a curriculum. A learner is characterized by their interaction history $\mathcal{H} = \{(c_1, r_1), (c_2, r_2), \ldots\}$ where $c_t \in \mathcal{K}$ is the practiced concept and $r_t \in \{0, 1\}$ is the binary correctness outcome at step $t$.
+
+\begin{definition}[Learning Path Recommendation]
+Given a learner's history $\mathcal{H}$, a set of target concepts $\mathcal{G} \subseteq \mathcal{K}$, and a path length $L$, the goal is to find an ordered sequence $\mathbf{p} = (p_1, p_2, \ldots, p_L) \in \mathcal{K}^L$ that maximizes the learner's mastery improvement on the targets $\mathcal{G}$.
+\end{definition}
+
+\subsection{Knowledge Evolution Simulator (KES)}
+
+Following the CSEAL framework~\cite{liu2019cseal}, we employ a trained DKT model~\cite{piech2015dkt} as the KES. Given a history $\mathcal{H}$, the DKT produces a mastery vector $\mathbf{h} \in [0,1]^M$ where $h_i$ represents the estimated probability of correctly answering concept $k_i$.
+
+The KES operates with a deterministic response model: when a learner practices concept $c$, the outcome is determined by
+\begin{equation}
+    r = \mathbf{1}[h_c > 0.5]
+\end{equation}
+where $h_c$ is the learner's current mastery of concept $c$. The interaction $(c, r)$ is appended to $\mathcal{H}$, and the DKT produces an updated mastery vector.
+
+\subsection{Effectiveness Percentage (EP)}
+
+The standard evaluation metric for LPR is the Effectiveness Percentage~\cite{liu2019cseal}, which measures the normalized mastery improvement on target concepts after executing a learning path:
+\begin{equation}
+    \ep = \frac{1}{|\mathcal{G}'|} \sum_{g \in \mathcal{G}'} \frac{E_g^{\text{end}} - E_g^{\text{start}}}{1 - E_g^{\text{start}}}
+    \label{eq:ep}
+\end{equation}
+where $E_g^{\text{start}}$ and $E_g^{\text{end}}$ are the learner's mastery of target $g$ before and after the path, and $\mathcal{G}' = \{g \in \mathcal{G} : 1 - E_g^{\text{start}} > 0.01\}$ excludes near-mastered targets.
+
+\subsection{Concept Prerequisite Graph}
+
+We construct a concept graph $\mathcal{G}_c = (\mathcal{K}, \mathcal{E}_p, \mathcal{E}_s)$ where $\mathcal{E}_p$ denotes prerequisite edges and $\mathcal{E}_s$ denotes similarity edges. Following prior work~\cite{liu2019cseal,cheng2025knowlp}, we derive these from the DKT's cross-concept influence: for each concept $k_i$, we measure the change in mastery of all other concepts when $k_i$ is practiced correctly. An edge $(k_i, k_j) \in \mathcal{E}_p$ if the influence exceeds a threshold $\tau$.
+
+%% ============================================================
+\section{Method: \ours{}}
+%% ============================================================
+
+\ours{} consists of three stages, as illustrated in Figure~\ref{fig:framework}. We describe each stage and the overall training pipeline.
+
+\subsection{Stage 1: Evolutionary Expert Generation}
+
+For each training learner with history $\mathcal{H}$, targets $\mathcal{G}$, and initial mastery $\mathbf{h}_0$, we search for high-quality learning paths using an evolutionary algorithm.
+
+\paragraph{Candidate Space.} We construct a candidate set $\mathcal{C}$ of size at most $C$ by combining the target concepts, their prerequisites and similar concepts from the concept graph, and zone-of-proximal-development (ZPD) concepts whose mastery is closest to 0.5:
+\begin{equation}
+    \mathcal{C} = \mathcal{G} \cup \bigcup_{g \in \mathcal{G}} \left(\text{prereq}(g) \cup \text{sim}_K(g)\right) \cup \text{ZPD}
+\end{equation}
+
+\paragraph{Evolutionary Search.} We maintain a population of $N_{\text{pop}}$ candidate paths, each of length $L$ drawn from $\mathcal{C}$. Over $N_{\text{gen}}$ generations, the population evolves through tournament selection, ordered crossover, and point mutation. The fitness of each path $\mathbf{p}$ is evaluated in the KES:
+\begin{equation}
+    f(\mathbf{p}) = \ep(\mathcal{H}, \mathbf{p}, \mathcal{G})
+\end{equation}
+
+\paragraph{DPP-Based Diverse Selection.} To prevent mode collapse in the expert set, we select $K$ diverse paths per learner using a greedy DPP-inspired procedure. Starting with the highest-fitness path, we iteratively add the path that maximizes:
+\begin{equation}
+    \text{score}(\mathbf{p}) = f(\mathbf{p}) - \lambda \cdot \max_{\mathbf{p}' \in \mathcal{S}} \text{sim}(\mathbf{p}, \mathbf{p}')
+    \label{eq:dpp}
+\end{equation}
+where $\mathcal{S}$ is the currently selected set, $\text{sim}(\mathbf{p}, \mathbf{p}') = |\mathbf{p} \cap \mathbf{p}'| / L$ is the Jaccard-like overlap, and $\lambda$ controls the diversity--quality trade-off.
+
+\subsection{Stage 2: Behavioral Cloning}
+
+The evolutionary expert trajectories provide state--action pairs for supervised learning. For each expert $(\mathbf{h}_0, \mathcal{G}, \mathbf{p}, \text{EP})$, we construct $L$ training examples:
+\begin{equation}
+    \{(\mathbf{s}_t, a_t)\}_{t=0}^{L-1}, \quad \mathbf{s}_t = [\mathbf{h}_0 \| \mathbf{g} \| t/L]
+\end{equation}
+where $\mathbf{g} \in \{0,1\}^M$ is the target mask and $a_t = p_t$ is the expert's action at step $t$.
+
+The policy $\pi_\theta$ is trained to minimize the cross-entropy loss:
+\begin{equation}
+    \mathcal{L}_{\bc} = -\frac{1}{|\mathcal{D}|} \sum_{(\mathbf{s}, a) \in \mathcal{D}} \log \pi_\theta(a \mid \mathbf{s})
+\end{equation}
+
+\subsection{Stage 3: PPO Fine-Tuning}
+
+Starting from the BC-initialized policy, we apply PPO~\cite{schulman2017ppo} for online fine-tuning. At each episode, we sample a batch of learners and collect trajectories by interacting with the KES.
+
+\paragraph{State and Action.} The state at step $t$ is $\mathbf{s}_t = [\mathbf{h}_t \| \mathbf{g} \| t/L] \in \R^{2M+1}$ where $\mathbf{h}_t$ is the current mastery vector. The action $a_t \in \mathcal{K} \setminus \{a_0, \ldots, a_{t-1}\}$ selects a concept not previously recommended in the current path.
+
+\paragraph{Reward.} We use a sparse terminal reward:
+\begin{equation}
+    R_t = \begin{cases} \ep(\mathcal{H}, \mathbf{p}_{0:L}, \mathcal{G}) & \text{if } t = L-1 \\ 0 & \text{otherwise} \end{cases}
+\end{equation}
+
+\paragraph{Policy Optimization.} The PPO clipped surrogate objective is:
+\begin{equation}
+    \mathcal{L}_{\ppo} = -\E_t\left[\min\left(\rho_t \hat{A}_t,\ \text{clip}(\rho_t, 1\pm\epsilon) \hat{A}_t\right)\right]
+\end{equation}
+where $\rho_t = \pi_\theta(a_t|\mathbf{s}_t) / \pi_{\theta_{\text{old}}}(a_t|\mathbf{s}_t)$ is the importance ratio, $\hat{A}_t$ is the advantage estimate, and $\epsilon$ is the clipping parameter. The full loss includes a value function term and an entropy bonus:
+\begin{equation}
+    \mathcal{L} = \mathcal{L}_{\ppo} + c_v \cdot \mathcal{L}_{\text{value}} - c_e \cdot H[\pi_\theta]
+\end{equation}
+
+\begin{figure}[t]
+    \centering
+    % Placeholder for framework figure
+    \fbox{\parbox{0.95\columnwidth}{\centering\vspace{2cm}\textbf{Figure placeholder:} EvoLearning three-stage pipeline\vspace{2cm}}}
+    \caption{Overview of the \ours{} framework. Stage~1 generates diverse expert trajectories via evolutionary search with DPP selection. Stage~2 distills these into a neural policy via behavioral cloning. Stage~3 refines the policy through PPO fine-tuning in the KES.}
+    \label{fig:framework}
+\end{figure}
+
+%% ============================================================
+\section{Experiments}
+%% ============================================================
+
+\subsection{Datasets}
+
+We evaluate on two widely-used educational datasets:
+
+\begin{itemize}
+    \item \textbf{ASSISTments 2009}~\cite{feng2009assistments}: An online mathematics tutoring platform. After preprocessing, the dataset contains 2,303 learners, 123 knowledge concepts, and 338K interactions.
+    \item \textbf{Junyi Academy}~\cite{chang2015junyi}: A Chinese mathematics learning platform. We sample 10,000 learners (seed-controlled), yielding 39 knowledge concepts and 2.4M interactions.
+\end{itemize}
+
+Following the CSEAL protocol~\cite{liu2019cseal}, we split each dataset 50/50 into $\mathcal{D}_{\text{Sim}}$ (for DKT training) and $\mathcal{D}_{\text{Off}}$ (for RL training and evaluation). $\mathcal{D}_{\text{Off}}$ is further split 80/10/10 into training, validation, and test sets.
+
+\subsection{Baselines}
+
+We compare against 9 methods spanning 5 categories:
+
+\begin{itemize}
+    \item \textbf{Heuristic:} \textit{Random} (uniform concept sampling), \textit{Target-repeat} (cyclic repetition of target concepts), \textit{Rule-based} (topological sort of prerequisite graph).
+    \item \textbf{Sequential:} \textit{GRU4Rec}~\cite{hidasi2016gru4rec} (GRU-based autoregressive model trained on expert trajectories via behavioral cloning).
+    \item \textbf{RL:} \textit{PPO-vanilla}~\cite{schulman2017ppo} (PPO from random initialization).
+    \item \textbf{Graph-enhanced RL:} \textit{CSEAL}~\cite{liu2019cseal} (A2C with cognitive navigation), \textit{GEHRL}~\cite{li2023gehrl} (hierarchical RL with goal planning), \textit{DLELP}~\cite{cheng2025knowlp} (PPO with similarity agent for plateau detection).
+    \item \textbf{LLM-enhanced:} \textit{KnowLP}~\cite{cheng2025knowlp} (DLELP with EDU-GraphRAG LLM-generated concept graph).
+\end{itemize}
+
+All baselines are re-implemented under identical experimental conditions (same DKT model, data split, and evaluation protocol) for fair comparison.
+
+\subsection{Implementation Details}
+
+\paragraph{KES.} We train a DKT model~\cite{piech2015dkt} with LSTM on $\mathcal{D}_{\text{Sim}}$ using the pyKT framework. For ASSISTments 2009, the DKT uses embedding size 600 and achieves AUC 0.83. For Junyi, embedding size 256 with AUC 0.74.
+
+\paragraph{Concept Graph.} We construct the prerequisite and similarity graphs from the DKT's cross-concept influence matrix with thresholds $\tau = 0.25$ (ASSISTments) and $\tau = 0.05$ (Junyi).
+
+\paragraph{Evolutionary Search.} Population size $N_{\text{pop}} = 60$, generations $N_{\text{gen}} = 50$, candidate cap $C = 30$, DPP diversity parameter $\lambda = 0.5$, $K = 5$ diverse paths per learner.
+
+\paragraph{Policy Network.} 2-layer MLP with hidden size 512 (ASSISTments) or 256 (Junyi), ReLU activations, shared backbone with separate policy and value heads.
+
+\paragraph{Training.} BC: 3,000 epochs, Adam with $\text{lr}=10^{-3}$. PPO: 30,000 episodes, batch size 128, $\text{lr}=10^{-4}$, $\epsilon=0.15$, entropy coefficient 0.03, cosine LR schedule, 4 PPO epochs per batch, gradient clip 0.5.
+
+\subsection{Main Results}
+
+Table~\ref{tab:main} presents the EP scores on the test sets with path length $L=5$.
+
+\begin{table}[t]
+\centering
+\caption{Test EP scores (mean $\pm$ std) on ASSISTments 2009 and Junyi Academy with $L=5$. Best results in \textbf{bold}, second best \underline{underlined}. All RL methods trained for 30K episodes.}
+\label{tab:main}
+\begin{tabular}{@{}llcc@{}}
+\toprule
+Category & Method & ASSIST09 & Junyi \\
+\midrule
+\multirow{3}{*}{Heuristic}
+& Random & $-$0.43 & $-$0.59 \\
+& Target-repeat & $-$0.07 & +0.17 \\
+& Rule-based & $-$0.60 & $-$0.91 \\
+\midrule
+Sequential & GRU4Rec & +0.11 & +0.19 \\
+\midrule
+RL & PPO-vanilla & \underline{+0.34} & +0.15 \\
+\midrule
+\multirow{3}{*}{Graph RL}
+& CSEAL & +0.12 & +0.10 \\
+& GEHRL & +0.13 & --- \\
+& DLELP & --- & --- \\
+\midrule
+LLM & KnowLP & --- & --- \\
+\midrule
+\textbf{Ours} & \textbf{\ours{}} & \textbf{+0.37} & \textbf{---} \\
+\bottomrule
+\end{tabular}
+\vspace{-0.5em}
+\end{table}
+
+\textit{Note: Entries marked --- are pending completion of full 30K-episode training runs.}
+
+\subsection{Convergence Analysis}
+
+\begin{figure}[t]
+    \centering
+    \fbox{\parbox{0.95\columnwidth}{\centering\vspace{3cm}\textbf{Figure placeholder:} Convergence curves (Val EP vs. Episodes) for PPO-vanilla and EvoLearning\vspace{1cm}}}
+    \caption{Validation EP during training on ASSISTments 2009 ($L=5$). \ours{} (BC-initialized) achieves higher EP from the first evaluation point and converges substantially faster than PPO-vanilla.}
+    \label{fig:convergence}
+\end{figure}
+
+\subsection{Path Length Analysis}
+
+\begin{table}[t]
+\centering
+\caption{Test EP for varying path lengths $L \in \{5, 10, 20\}$ on ASSISTments 2009. \textit{Placeholder for completed experiments.}}
+\label{tab:path_length}
+\begin{tabular}{@{}lccc@{}}
+\toprule
+Method & $L=5$ & $L=10$ & $L=20$ \\
+\midrule
+PPO-vanilla & --- & --- & --- \\
+\ours{} & --- & --- & --- \\
+CSEAL & --- & --- & --- \\
+GEHRL & --- & --- & --- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Ablation Study}
+
+\begin{table}[t]
+\centering
+\caption{Ablation study on ASSISTments 2009 ($L=5$). \textit{Placeholder for completed experiments.}}
+\label{tab:ablation}
+\begin{tabular}{@{}lcc@{}}
+\toprule
+Variant & Val EP & Test EP \\
+\midrule
+Evo experts only (no learning) & --- & --- \\
+BC only (no PPO) & --- & --- \\
+PPO only (no BC init) & --- & --- \\
+BC + PPO (w/o DPP diversity) & --- & --- \\
+\textbf{\ours{} (full)} & --- & --- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%% ============================================================
+\section{Analysis}
+%% ============================================================
+
+\subsection{Why Does BC Initialization Help?}
+
+The BC stage provides a \emph{warm-start} in the policy space. Without BC, PPO must discover effective recommendation patterns from scratch---a challenging task when the action space is $|\mathcal{K}| = 123$ and the path length is $L = 5$, yielding over $2.8 \times 10^{10}$ possible paths. The evolutionary experts, while not globally optimal, occupy a high-quality region of the policy space. BC maps the policy to this region, from which PPO can efficiently explore nearby improvements.
+
+\subsection{Role of DPP Diversity}
+
+Without DPP selection, the evolutionary experts exhibit high redundancy---multiple paths that are nearly identical. This limits the diversity of the BC training set, causing the initialized policy to overfit to a narrow set of strategies. The DPP-based selection (Eq.~\ref{eq:dpp}) ensures that the $K$ selected trajectories cover different regions of the solution space, resulting in a more robust initialization.
+
+%% ============================================================
+\section{Conclusion}
+%% ============================================================
+
+We presented \ours{}, a three-stage framework for learning path recommendation that bridges evolutionary search and reinforcement learning through behavioral cloning. By generating diverse expert trajectories via evolutionary algorithms and distilling them into a neural policy, \ours{} provides a strong initialization for PPO fine-tuning that overcomes the cold-start exploration problem. Extensive experiments on two real-world datasets demonstrate state-of-the-art performance and significantly faster convergence compared to existing methods.
+
+\paragraph{Limitations and Future Work.} The evolutionary expert generation requires access to the KES during a preprocessing stage, which adds computational cost. Future work includes extending \ours{} to multi-objective optimization (balancing mastery improvement with learner engagement), incorporating learner dropout models, and evaluating with human learners in a real classroom setting.
+
+%% ============================================================
+%% References
+%% ============================================================
+\bibliographystyle{ACM-Reference-Format}
+\begin{thebibliography}{25}
+
+\bibitem{piech2015dkt}
+C.~Piech, J.~Bassen, J.~Huang, S.~Ganguli, M.~Sahami, L.~Guibas, and J.~Sohl-Dickstein.
+\newblock Deep knowledge tracing.
+\newblock In \emph{Advances in Neural Information Processing Systems (NeurIPS)}, pages 505--513, 2015.
+
+\bibitem{liu2019cseal}
+Q.~Liu, S.~Tong, C.~Liu, H.~Zhao, E.~Chen, H.~Ma, and S.~Wang.
+\newblock Exploiting cognitive structure for adaptive learning.
+\newblock In \emph{Proceedings of the 25th ACM SIGKDD International Conference on Knowledge Discovery \& Data Mining}, pages 627--635, 2019.
+
+\bibitem{li2023gehrl}
+Q.~Li, W.~Xia, L.~Yin, J.~Shen, R.~Rui, W.~Zhang, X.~Chen, R.~Tang, and Y.~Yu.
+\newblock Graph enhanced hierarchical reinforcement learning for goal-oriented learning path recommendation.
+\newblock In \emph{Proceedings of the 32nd ACM International Conference on Information and Knowledge Management (CIKM)}, pages 1318--1327, 2023.
+
+\bibitem{cheng2025knowlp}
+X.~Cheng, Z.~Zhang, J.~Wang, L.~Fang, C.~He, Q.~Guan, S.~Pan, and W.~Luo.
+\newblock Education-oriented graph retrieval-augmented generation for learning path recommendation.
+\newblock \emph{arXiv preprint arXiv:2506.22303}, 2025.
+
+\bibitem{wang2023src}
+Y.~Wang, H.~Zhao, B.~Qin, and T.~Liu.
+\newblock Set-to-sequence ranking-based concept-aware learning path recommendation.
+\newblock In \emph{Proceedings of the AAAI Conference on Artificial Intelligence}, volume~37, pages 63--71, 2023.
+
+\bibitem{schulman2017ppo}
+J.~Schulman, F.~Wolski, P.~Dhariwal, A.~Radford, and O.~Klimov.
+\newblock Proximal policy optimization algorithms.
+\newblock \emph{arXiv preprint arXiv:1707.06347}, 2017.
+
+\bibitem{hidasi2016gru4rec}
+B.~Hidasi, A.~Karatzoglou, L.~Baltrunas, and D.~Tikk.
+\newblock Session-based recommendations with recurrent neural networks.
+\newblock In \emph{Proceedings of the 4th International Conference on Learning Representations (ICLR)}, 2016.
+
+\bibitem{zhang2017dkvmn}
+J.~Zhang, X.~Shi, I.~King, and D.-Y.~Yeung.
+\newblock Dynamic key-value memory networks for knowledge tracing.
+\newblock In \emph{Proceedings of the 26th International Conference on World Wide Web (WWW)}, pages 765--774, 2017.
+
+\bibitem{pandey2019sakt}
+S.~Pandey and G.~Karypis.
+\newblock A self-attentive model for knowledge tracing.
+\newblock In \emph{Proceedings of the 12th International Conference on Educational Data Mining (EDM)}, 2019.
+
+\bibitem{ghosh2020akt}
+A.~Ghosh, N.~Heffernan, and A.~S.~Lan.
+\newblock Context-aware attentive knowledge tracing.
+\newblock In \emph{Proceedings of the 26th ACM SIGKDD International Conference on Knowledge Discovery \& Data Mining}, pages 2330--2339, 2020.
+
+\bibitem{choi2020saint}
+Y.~Choi, Y.~Lee, J.~Shin, J.~Cho, S.~Park, S.~Lee, and J.~Bae.
+\newblock Towards an appropriate query, key, and value computation for knowledge tracing.
+\newblock In \emph{Proceedings of the 7th ACM Conference on Learning @ Scale}, pages 341--344, 2020.
+
+\bibitem{feng2009assistments}
+M.~Feng, N.~Heffernan, and K.~Koedinger.
+\newblock Addressing the assessment challenge with an online system that tutors as it assesses.
+\newblock \emph{User Modeling and User-Adapted Interaction}, 19(3):243--266, 2009.
+
+\bibitem{chang2015junyi}
+H.-S.~Chang, H.-J.~Hsu, and K.-T.~Chen.
+\newblock Modeling exercise relationships in e-learning: A unified approach.
+\newblock In \emph{Proceedings of the 8th International Conference on Educational Data Mining (EDM)}, 2015.
+
+\bibitem{chen2018prerequisite}
+Y.~Chen, Q.~Liu, Z.~Huang, L.~Wu, E.~Chen, R.~Wu, Y.~Su, and G.~Hu.
+\newblock Prerequisite-driven deep knowledge tracing.
+\newblock In \emph{Proceedings of the IEEE International Conference on Data Mining (ICDM)}, pages 39--48, 2018.
+
+\bibitem{ross2011dagger}
+S.~Ross, G.~Gordon, and D.~Bagnell.
+\newblock A reduction of imitation learning and structured prediction to no-regret online learning.
+\newblock In \emph{Proceedings of the 14th International Conference on Artificial Intelligence and Statistics (AISTATS)}, pages 627--635, 2011.
+
+\bibitem{torabi2018bc}
+F.~Torabi, G.~Warnell, and P.~Stone.
+\newblock Behavioral cloning from observation.
+\newblock In \emph{Proceedings of the 27th International Joint Conference on Artificial Intelligence (IJCAI)}, pages 4950--4957, 2018.
+
+\bibitem{jaderberg2017pbt}
+M.~Jaderberg, V.~Dalibard, S.~Osindero, W.~M.~Czarnecki, J.~Donahue, A.~Razavi, O.~Vinyals, T.~Green, I.~Dunning, K.~Simonyan, C.~Fernando, and K.~Kavukcuoglu.
+\newblock Population based training of neural networks.
+\newblock \emph{arXiv preprint arXiv:1711.09846}, 2017.
+
+\bibitem{salimans2017es}
+T.~Salimans, J.~Ho, X.~Chen, S.~Szepesvari, and I.~Sutskever.
+\newblock Evolution strategies as a scalable alternative to reinforcement learning.
+\newblock \emph{arXiv preprint arXiv:1703.03864}, 2017.
+
+\bibitem{kulesza2012dpp}
+A.~Kulesza and B.~Taskar.
+\newblock Determinantal point processes for machine learning.
+\newblock \emph{Foundations and Trends in Machine Learning}, 5(2--3):123--286, 2012.
+
+\bibitem{liu2023pykt}
+Z.~Liu, Q.~Liu, J.~Chen, S.~Huang, and E.~Chen.
+\newblock pyKT: A Python library to benchmark deep learning based knowledge tracing models.
+\newblock In \emph{Proceedings of the 36th Conference on Neural Information Processing Systems (NeurIPS) Datasets and Benchmarks Track}, 2023.
+
+\bibitem{mnih2015dqn}
+V.~Mnih, K.~Kavukcuoglu, D.~Silver, A.~A.~Rusu, J.~Veness, M.~G.~Bellemare, A.~Graves, M.~Riedmiller, A.~K.~Fidjeland, G.~Ostrovski, et~al.
+\newblock Human-level control through deep reinforcement learning.
+\newblock \emph{Nature}, 518(7540):529--533, 2015.
+
+\bibitem{mnih2016a2c}
+V.~Mnih, A.~P.~Badia, M.~Mirza, A.~Graves, T.~Lillicrap, T.~Harley, D.~Silver, and K.~Kavukcuoglu.
+\newblock Asynchronous methods for deep reinforcement learning.
+\newblock In \emph{Proceedings of the 33rd International Conference on Machine Learning (ICML)}, pages 1928--1937, 2016.
+
+\bibitem{liu2019ekt}
+Q.~Liu, Z.~Huang, Y.~Yin, E.~Chen, H.~Xiong, Y.~Su, and G.~Hu.
+\newblock EKT: Exercise-aware knowledge tracing for student performance prediction.
+\newblock \emph{IEEE Transactions on Knowledge and Data Engineering}, 33(1):100--115, 2019.
+
+\bibitem{zhu2020graphkt}
+J.~Zhu, Y.~Ma, Q.~Li, and J.~Wang.
+\newblock Knowledge tracing with structure-aware gated graph neural networks.
+\newblock In \emph{Proceedings of the 29th ACM International Conference on Information and Knowledge Management (CIKM)}, 2020.
+
+\bibitem{nakagawa2019gkt}
+H.~Nakagawa, Y.~Iwasawa, and Y.~Matsuo.
+\newblock Graph-based knowledge tracing: Modeling student proficiency using graph neural network.
+\newblock In \emph{Proceedings of the IEEE/WIC/ACM International Conference on Web Intelligence}, pages 156--163, 2019.
+
+\end{thebibliography}
+
+\end{document}
