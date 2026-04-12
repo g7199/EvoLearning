@@ -92,9 +92,13 @@ Knowledge tracing (KT) models estimate a learner's evolving mastery over time fr
 
 Early LPR methods relied on heuristic rules such as prerequisite ordering~\cite{chen2018prerequisite} and difficulty matching~\cite{liu2019cseal}. The CSEAL framework~\cite{liu2019cseal} introduced the KES paradigm, training an RL agent within a DKT simulator using actor-critic methods with cognitive navigation---restricting the action space to graph-related concepts. SRC~\cite{wang2023src} formulated LPR as a set-to-sequence problem with concept-aware ranking. GEHRL~\cite{li2023gehrl} proposed hierarchical RL with a goal-planning agent and a goal-achieving agent, incorporating graph-based candidate filtering. DLELP and KnowLP~\cite{cheng2025knowlp} employ a multi-agent system with prerequisite and similarity agents, using EDU-GraphRAG for knowledge graph construction. GRU4Rec~\cite{hidasi2016gru4rec}, originally designed for session-based recommendation, has been adapted for sequential learning path generation.
 
-\subsection{Evolutionary Methods in RL}
+\subsection{Bridging Search and Policy Optimization}
 
-Evolutionary algorithms have been combined with RL in various ways. Population-based training~\cite{jaderberg2017pbt} evolves hyperparameters during RL training. Evolutionary strategies (ES)~\cite{salimans2017es} optimize policies directly through fitness evaluation. Our approach is distinct: we use evolution to \emph{generate expert demonstrations} rather than to optimize the policy itself, then leverage behavioral cloning~\cite{ross2011dagger,torabi2018bc} to transfer the evolutionary knowledge into a differentiable policy.
+The paradigm of combining search-based expert generation with neural policy learning has a notable precedent in game AI: AlphaGo~\cite{silver2016alphago} uses Monte Carlo Tree Search (MCTS) to generate expert moves, trains a policy network via supervised learning, then refines it through self-play RL. Our approach follows an analogous three-stage structure---evolutionary search, behavioral cloning, PPO fine-tuning---but is motivated by fundamentally different domain characteristics.
+
+In broader RL, evolutionary algorithms have been integrated with gradient-based methods: ERL~\cite{khadka2018erl} maintains an evolving population alongside a gradient-trained actor, and population-based training~\cite{jaderberg2017pbt} evolves hyperparameters during RL training. Evolutionary strategies~\cite{salimans2017es} replace gradient descent entirely. However, these approaches use evolution to optimize the \emph{policy itself}. Our key distinction is using evolution to generate \emph{per-instance expert demonstrations}---personalized trajectories for each learner---which are then distilled into a generalizable policy via BC.
+
+This per-instance search approach is particularly well-suited to LPR for three reasons that do not hold in most RL domains: (1) the KES provides a \emph{differentiable, zero-cost simulator} that makes exhaustive per-instance evaluation tractable; (2) the action space, while combinatorially large ($\binom{M}{L}$ possible paths), is \emph{discrete and finite}, making evolutionary operators natural; and (3) each learner has a \emph{unique optimal path} determined by their knowledge state, so a global policy must generalize across diverse starting conditions---exactly the setting where diverse demonstrations improve BC coverage.
 
 %% ============================================================
 \section{Preliminaries}
@@ -309,11 +313,19 @@ BC + PPO (w/o DPP diversity) & --- & --- \\
 
 \subsection{Why Does BC Initialization Help?}
 
-The BC stage provides a \emph{warm-start} in the policy space. Without BC, PPO must discover effective recommendation patterns from scratch---a challenging task when the action space is $|\mathcal{K}| = 123$ and the path length is $L = 5$, yielding over $2.8 \times 10^{10}$ possible paths. The evolutionary experts, while not globally optimal, occupy a high-quality region of the policy space. BC maps the policy to this region, from which PPO can efficiently explore nearby improvements.
+The benefit of BC initialization extends beyond simple warm-starting. We identify three mechanisms through which the Evo$\to$BC pipeline improves PPO:
+
+\paragraph{(1) Escaping the exploration bottleneck.} In LPR, the reward is \emph{sparse}---only the terminal EP at step $L$ provides a learning signal, while all intermediate steps receive zero reward. A randomly initialized policy produces near-random paths with near-zero EP, providing negligible gradient signal. The BC-initialized policy, by contrast, already produces paths with positive EP from the first episode, generating informative gradients from the start.
+
+\paragraph{(2) Mitigating compounding errors.} Standard BC suffers from distribution shift~\cite{ross2011dagger}: small errors compound across sequential decisions because the policy encounters states not seen during training. In our framework, PPO \emph{corrects} this shift through online interaction---the fine-tuning stage explicitly trains on the policy's own state distribution, closing the gap that pure BC leaves open. This positions our approach between pure imitation (BC) and pure exploration (PPO), combining the sample efficiency of the former with the asymptotic optimality of the latter.
+
+\paragraph{(3) Biasing exploration toward high-reward regions.} The entropy-regularized PPO objective encourages exploration, but the \emph{direction} of exploration depends on the initial policy. A BC-initialized policy explores \emph{around} known-good strategies, while a random policy explores uniformly. In the $\binom{M}{L}$ path space, the high-reward region is vanishingly small; BC initialization ensures that PPO's exploration budget is spent in the vicinity of this region rather than in the vast low-reward space.
 
 \subsection{Role of DPP Diversity}
 
-Without DPP selection, the evolutionary experts exhibit high redundancy---multiple paths that are nearly identical. This limits the diversity of the BC training set, causing the initialized policy to overfit to a narrow set of strategies. The DPP-based selection (Eq.~\ref{eq:dpp}) ensures that the $K$ selected trajectories cover different regions of the solution space, resulting in a more robust initialization.
+A critical but subtle design choice is the DPP-based diverse expert selection (Eq.~\ref{eq:dpp}). Without diversity enforcement, evolutionary search converges to a narrow fitness peak, producing near-identical expert paths. When BC trains on such redundant demonstrations, the resulting policy \emph{mode-collapses}---it memorizes a single strategy rather than learning a generalizable mapping from states to actions.
+
+DPP selection ensures that the $K$ trajectories per learner cover qualitatively different strategies (e.g., prerequisite-first vs.\ target-direct vs.\ ZPD-focused paths). This diversity in the training set acts as implicit regularization, producing a BC policy that generalizes across the state space rather than overfitting to one behavioral mode. We validate this in the ablation study (Table~\ref{tab:ablation}).
 
 %% ============================================================
 \section{Conclusion}
@@ -321,7 +333,13 @@ Without DPP selection, the evolutionary experts exhibit high redundancy---multip
 
 We presented \ours{}, a three-stage framework for learning path recommendation that bridges evolutionary search and reinforcement learning through behavioral cloning. By generating diverse expert trajectories via evolutionary algorithms and distilling them into a neural policy, \ours{} provides a strong initialization for PPO fine-tuning that overcomes the cold-start exploration problem. Extensive experiments on two real-world datasets demonstrate state-of-the-art performance and significantly faster convergence compared to existing methods.
 
-\paragraph{Limitations and Future Work.} The evolutionary expert generation requires access to the KES during a preprocessing stage, which adds computational cost. Future work includes extending \ours{} to multi-objective optimization (balancing mastery improvement with learner engagement), incorporating learner dropout models, and evaluating with human learners in a real classroom setting.
+\paragraph{Limitations and Future Work.}
+
+\textit{Computational cost.} The evolutionary expert generation requires $N_{\text{train}} \times N_{\text{pop}} \times N_{\text{gen}} \times L$ KES evaluations as a preprocessing step. On ASSISTments 2009 (921 learners), this takes approximately 70 minutes on a single GPU. However, this cost is (a)~\emph{amortized}---experts are generated once and reused across all BC training runs---and (b)~\emph{parallelizable}---per-learner searches are independent and can be distributed across GPUs. For datasets with $>$10K learners (e.g., Junyi), we observe linear scaling at $\sim$1 learner/second with batched GPU evaluation.
+
+\textit{Candidate space sensitivity.} The evolutionary candidate set $\mathcal{C}$ relies on the concept graph structure (prerequisites, similarity) and ZPD heuristics. While our DKT-derived graph is data-driven rather than manually constructed, the candidate cap $C$ and ZPD threshold are hyperparameters. We leave systematic sensitivity analysis for future work.
+
+\textit{Future directions.} Extending \ours{} to multi-objective optimization (balancing mastery improvement with learner engagement and cognitive load), evaluating with human learners beyond simulation, and exploring online adaptation of the evolutionary experts as the policy improves are promising directions.
 
 %% ============================================================
 %% References
@@ -453,6 +471,16 @@ J.~Zhu, Y.~Ma, Q.~Li, and J.~Wang.
 H.~Nakagawa, Y.~Iwasawa, and Y.~Matsuo.
 \newblock Graph-based knowledge tracing: Modeling student proficiency using graph neural network.
 \newblock In \emph{Proceedings of the IEEE/WIC/ACM International Conference on Web Intelligence}, pages 156--163, 2019.
+
+\bibitem{silver2016alphago}
+D.~Silver, A.~Huang, C.~J.~Maddison, A.~Guez, L.~Sifre, G.~van~den~Driessche, J.~Schrittwieser, I.~Antonoglou, V.~Panneershelvam, M.~Lanctot, et~al.
+\newblock Mastering the game of {G}o with deep neural networks and tree search.
+\newblock \emph{Nature}, 529(7587):484--489, 2016.
+
+\bibitem{khadka2018erl}
+S.~Khadka and K.~Tumer.
+\newblock Evolution-guided policy gradient in reinforcement learning.
+\newblock In \emph{Advances in Neural Information Processing Systems (NeurIPS)}, pages 1196--1208, 2018.
 
 \end{thebibliography}
 
