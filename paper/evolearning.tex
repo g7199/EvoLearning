@@ -8,6 +8,7 @@
 \usepackage{xcolor}
 \usepackage{graphicx}
 \usepackage{subcaption}
+\usepackage{enumitem}
 
 \newcommand{\ours}{\textsc{EvoLearning}}
 \newcommand{\ep}{\mathrm{EP}}
@@ -25,11 +26,13 @@
 \pagestyle{plain}
 
 \begin{document}
+\setlist[itemize]{leftmargin=10pt}
+\setlist[enumerate]{leftmargin=15pt}
 
-\title{EvoLearning: Evolutionary Expert-Guided Reinforcement Learning\\for Personalized Learning Path Recommendation}
+\title{EvoLearning: Evolutionary Expert-Guided Reinforcement Learning for Personalized Learning Path Recommendation}
 
 \author{Anonymous}
-\affiliation{\institution{Anonymous Institution}}
+\affiliation{\institution{Anonymous Institution} \country{}}
 \email{anonymous@anonymous.org}
 
 \begin{abstract}
@@ -239,39 +242,58 @@ All baselines are re-implemented under identical experimental conditions (same D
 
 \subsection{Main Results}
 
-Table~\ref{tab:main} presents the EP scores on the test sets with path length $L=5$.
+Table~\ref{tab:main} presents the EP scores across all datasets and path lengths.
 
-\begin{table}[t]
+\begin{table*}[t]
 \centering
-\caption{Test EP scores (mean $\pm$ std) on ASSISTments 2009 and Junyi Academy with $L=5$. Best results in \textbf{bold}, second best \underline{underlined}. All RL methods trained for 30K episodes.}
+\caption{Test EP scores across datasets and path lengths ($L \in \{5, 10, 20\}$). Best in \textbf{bold}, second best \underline{underlined}. All RL methods trained for 30K episodes; mean over 3 seeds reported. Entries marked --- are pending.}
 \label{tab:main}
-\begin{tabular}{@{}llcc@{}}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{@{}ll|ccc|ccc@{}}
 \toprule
-Category & Method & ASSIST09 & Junyi \\
+& & \multicolumn{3}{c|}{\textbf{ASSISTments 2009} {\small(123 KCs, 921 train, 116 test)}} & \multicolumn{3}{c}{\textbf{Junyi Academy} {\small(39 KCs, 4000 train, 500 test)}} \\
+Category & Method & $L=5$ & $L=10$ & $L=20$ & $L=5$ & $L=10$ & $L=20$ \\
 \midrule
 \multirow{3}{*}{Heuristic}
-& Random & $-$0.43 & $-$0.59 \\
-& Target-repeat & $-$0.07 & +0.17 \\
-& Rule-based & $-$0.60 & $-$0.91 \\
+& Random             & $-$0.43          & ---              & ---              & $-$0.59          & ---              & --- \\
+& Target-repeat      & $-$0.07          & ---              & ---              & +0.17            & ---              & --- \\
+& Rule-based         & $-$0.60          & ---              & ---              & $-$0.91          & ---              & --- \\
 \midrule
-Sequential & GRU4Rec & +0.11 & +0.19 \\
+Sequential
+& GRU4Rec            & +0.11            & ---              & ---              & +0.19            & ---              & --- \\
 \midrule
-RL & PPO-vanilla & \underline{+0.34} & +0.15 \\
+RL
+& PPO-vanilla        & \underline{+0.34}& ---              & ---              & +0.15            & ---              & --- \\
 \midrule
-\multirow{3}{*}{Graph RL}
-& CSEAL & +0.12 & +0.10 \\
-& GEHRL & +0.13 & --- \\
-& DLELP & --- & --- \\
+\multirow{3}{*}{\shortstack[l]{Graph-\\enhanced RL}}
+& CSEAL              & +0.12            & ---              & ---              & +0.10            & ---              & --- \\
+& GEHRL              & +0.13            & ---              & ---              & ---              & ---              & --- \\
+& DLELP              & ---              & ---              & ---              & ---              & ---              & --- \\
 \midrule
-LLM & KnowLP & --- & --- \\
+LLM-enhanced
+& KnowLP             & ---              & ---              & ---              & ---              & ---              & --- \\
 \midrule
-\textbf{Ours} & \textbf{\ours{}} & \textbf{+0.37} & \textbf{---} \\
+\rowcolor{gray!10}
+\textbf{Ours}
+& \textbf{\ours{}}   & \textbf{+0.37}   & ---              & ---              & ---              & ---              & --- \\
 \bottomrule
-\end{tabular}
-\vspace{-0.5em}
-\end{table}
+\end{tabular}%
+}
 
-\textit{Note: Entries marked --- are pending completion of full 30K-episode training runs.}
+\vspace{0.8em}
+% === Placeholder for third dataset ===
+% Uncomment and fill when ready:
+% \resizebox{\textwidth}{!}{%
+% \begin{tabular}{@{}ll|ccc@{}}
+% \toprule
+% & & \multicolumn{3}{c}{\textbf{EdNet} {\small(-- KCs, -- train, -- test)}} \\
+% Category & Method & $L=5$ & $L=10$ & $L=20$ \\
+% \midrule
+% ... & ... & --- & --- & --- \\
+% \bottomrule
+% \end{tabular}%
+% }
+\end{table*}
 
 \subsection{Convergence Analysis}
 
@@ -281,24 +303,6 @@ LLM & KnowLP & --- & --- \\
     \caption{Validation EP during training on ASSISTments 2009 ($L=5$). \ours{} (BC-initialized) achieves higher EP from the first evaluation point and converges substantially faster than PPO-vanilla.}
     \label{fig:convergence}
 \end{figure}
-
-\subsection{Path Length Analysis}
-
-\begin{table}[t]
-\centering
-\caption{Test EP for varying path lengths $L \in \{5, 10, 20\}$ on ASSISTments 2009. \textit{Placeholder for completed experiments.}}
-\label{tab:path_length}
-\begin{tabular}{@{}lccc@{}}
-\toprule
-Method & $L=5$ & $L=10$ & $L=20$ \\
-\midrule
-PPO-vanilla & --- & --- & --- \\
-\ours{} & --- & --- & --- \\
-CSEAL & --- & --- & --- \\
-GEHRL & --- & --- & --- \\
-\bottomrule
-\end{tabular}
-\end{table}
 
 \subsection{Ablation Study}
 
