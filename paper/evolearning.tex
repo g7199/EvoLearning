@@ -94,11 +94,9 @@ Early LPR methods relied on heuristic rules such as prerequisite ordering~\cite{
 
 \subsection{Bridging Search and Policy Optimization}
 
-Combining search with policy learning has been explored in game AI---AlphaGo~\cite{silver2016alphago} uses MCTS$\to$SL$\to$RL---and in hybrid evolutionary-gradient methods: ERL~\cite{khadka2018erl} co-evolves a population alongside a gradient-trained actor, and population-based training~\cite{jaderberg2017pbt} evolves hyperparameters online. Our approach differs from these in two structural ways.
+Hybrid evolutionary-gradient approaches have been explored in RL: ERL~\cite{khadka2018erl} co-evolves a population alongside a gradient-trained actor, population-based training~\cite{jaderberg2017pbt} evolves hyperparameters online, and evolutionary strategies~\cite{salimans2017es} replace gradient descent entirely. These methods use evolution to optimize the \emph{policy itself}. Our approach is structurally different: we use evolution to generate \emph{per-instance expert demonstrations}---personalized trajectories for each learner---and compress them into a generalizable policy via behavioral cloning~\cite{ross2011dagger,torabi2018bc}. The deployed policy is a lightweight MLP with no simulator dependency, making it suitable for real-time educational settings.
 
-First, unlike AlphaGo where MCTS runs \emph{at inference time} (requiring the simulator at deployment), our evolutionary search runs \emph{only during preprocessing}. The deployed policy is a lightweight MLP with no simulator dependency, making it suitable for real-time educational settings. Second, unlike ERL which evolves the \emph{policy parameters}, we evolve \emph{per-instance solutions}---personalized expert trajectories for each learner---and compress them into a generalizable policy via BC. This is critical because LPR is inherently a \emph{conditional} optimization problem: the optimal path depends on the individual learner's mastery state, so a single evolved policy cannot capture the full diversity of effective strategies.
-
-The LPR domain uniquely enables this approach because the KES provides a \emph{zero-cost, deterministic simulator} that makes exhaustive per-instance search tractable. In robotics or game domains, evaluating one candidate solution requires expensive physical simulation or self-play. In LPR, evaluating a path requires only $L$ forward passes through a small LSTM---enabling population sizes of 60 over 50 generations per learner with negligible cost. This asymmetry between cheap evaluation and expensive exploration is precisely what motivates using evolution for demonstration generation rather than for policy optimization.
+This design is enabled by a key property of the LPR domain: the KES provides a \emph{zero-cost, deterministic simulator}. Evaluating a candidate path requires only $L$ forward passes through a small LSTM, making per-instance evolutionary search tractable. In contrast, robotics or game domains require expensive physical simulation per evaluation, prohibiting exhaustive per-instance search. This asymmetry---cheap evaluation but exponentially large search space---is precisely the setting where evolutionary demonstration generation excels: evolution handles the combinatorial search efficiently, while BC distills the results into a policy that generalizes to unseen learners at test time.
 
 %% ============================================================
 \section{Preliminaries}
@@ -489,11 +487,6 @@ J.~Zhu, Y.~Ma, Q.~Li, and J.~Wang.
 H.~Nakagawa, Y.~Iwasawa, and Y.~Matsuo.
 \newblock Graph-based knowledge tracing: Modeling student proficiency using graph neural network.
 \newblock In \emph{Proceedings of the IEEE/WIC/ACM International Conference on Web Intelligence}, pages 156--163, 2019.
-
-\bibitem{silver2016alphago}
-D.~Silver, A.~Huang, C.~J.~Maddison, A.~Guez, L.~Sifre, G.~van~den~Driessche, J.~Schrittwieser, I.~Antonoglou, V.~Panneershelvam, M.~Lanctot, et~al.
-\newblock Mastering the game of {G}o with deep neural networks and tree search.
-\newblock \emph{Nature}, 529(7587):484--489, 2016.
 
 \bibitem{khadka2018erl}
 S.~Khadka and K.~Tumer.
