@@ -181,6 +181,10 @@ def run_all_methods(config: ExperimentConfig):
             '--n_episodes', str(config.n_episodes),
         ]
         log_path = os.path.join(out_dir, 'train.log')
+        # Clear old progress so tqdm doesn't show stale data
+        prog_path = os.path.join(out_dir, 'progress.json')
+        if os.path.exists(prog_path):
+            os.remove(prog_path)
         log_f = open(log_path, 'w')
         p = subprocess.Popen(
             cmd, stdout=log_f, stderr=subprocess.STDOUT,
