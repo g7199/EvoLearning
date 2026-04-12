@@ -30,17 +30,37 @@ class BaseMethod(ABC):
     def load(self, path: str): ...
 
     def _update_progress(self, out_dir, ep, n_episodes, reward=None, val=None):
-        """Write progress to JSON for tqdm monitoring."""
+        """Write progress to JSON for tqdm monitoring + accumulate history."""
         if out_dir is None:
             return
+        progress_path = os.path.join(out_dir, 'progress.json')
+        # Load existing history
+        try:
+            with open(progress_path) as f:
+                data = json.load(f)
+            history = data.get('history', [])
+        except (FileNotFoundError, json.JSONDecodeError):
+            history = []
+
+        entry = {'ep': ep}
+        if reward is not None:
+            entry['reward'] = round(float(reward), 4)
+        if val is not None:
+            entry['val'] = round(float(val), 4)
+
+        # Append to history (avoid duplicates)
+        if not history or history[-1].get('ep') != ep:
+            history.append(entry)
+
         p = {
             'method': self.name, 'ep': ep, 'total': n_episodes,
             'reward': float(reward) if reward is not None else None,
             'val': float(val) if val is not None else None,
             'status': 'running' if ep < n_episodes else 'done',
+            'history': history,
         }
         try:
-            with open(os.path.join(out_dir, 'progress.json'), 'w') as f:
+            with open(progress_path, 'w') as f:
                 json.dump(p, f)
         except Exception:
             pass
