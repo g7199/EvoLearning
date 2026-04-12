@@ -259,6 +259,59 @@ def _build_assistments_questions(df: pd.DataFrame) -> Dict:
     return meta
 
 
+def preprocess_assist09(raw_path: str, out_dir: str = None) -> str:
+    """
+    Preprocess ASSISTments 2009-2010 (skill_builder_data_corrected.csv).
+    Columns: order_id, user_id, skill_id, skill_name, correct, ...
+    """
+    out_dir = Path(out_dir or PROCESSED_DIR / "assist09")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_file = out_dir / "assist09_processed.pkl"
+
+    if out_file.exists():
+        print(f"[ASSIST09] Already processed: {out_file}")
+        return str(out_file)
+
+    print("[ASSIST09] Loading raw data...")
+    df = pd.read_csv(raw_path, encoding="latin-1", low_memory=False)
+    print(f"[ASSIST09] Raw rows: {len(df):,}")
+
+    # Drop rows without skill_id
+    df = df.dropna(subset=["skill_id"])
+    df["skill_id"] = df["skill_id"].astype(int)
+
+    # Normalize columns
+    df = df.copy()
+    df["user_id"] = df["user_id"].astype(str)
+    df["question_id"] = df["problem_id"].astype(str)
+    df["tags"] = df["skill_id"].astype(str)
+    df["correct"] = df["correct"].clip(0, 1).astype(int)
+    df["timestamp"] = pd.to_numeric(df["order_id"], errors="coerce").fillna(0).astype(float)
+    df["elapsed_time"] = pd.to_numeric(df["ms_first_response"], errors="coerce").fillna(30000) / 1000.0
+    df["elapsed_time"] = df["elapsed_time"].clip(1, 600)
+
+    print(f"[ASSIST09] Students: {df['user_id'].nunique()}, "
+          f"Skills: {df['tags'].nunique()}, Problems: {df['question_id'].nunique()}")
+
+    # Build question metadata
+    questions_meta = {}
+    for qid, grp in df.groupby("question_id"):
+        skills = grp["tags"].dropna().unique().tolist()
+        questions_meta[str(qid)] = {
+            "question_id": str(qid),
+            "kc_ids": [str(s) for s in skills] if skills else ["unknown"],
+        }
+
+    result = _common_preprocess(df, questions_meta, "assist09",
+                                min_interactions=20, max_interactions=5000)
+
+    with open(out_file, "wb") as f:
+        pickle.dump(result, f)
+    print(f"[ASSIST09] Saved: {out_file}")
+    _print_stats(result)
+    return str(out_file)
+
+
 # ──────────────────────────────────────────────────────────
 # Common preprocessing (Section 2.2 Steps 1-7)
 # ──────────────────────────────────────────────────────────

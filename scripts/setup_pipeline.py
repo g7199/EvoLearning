@@ -45,8 +45,8 @@ def setup_assist09(gpu):
         print(f"\n  [1/5] Preprocessed data exists: {proc_path}")
     else:
         print(f"\n  [1/5] Preprocessing ASSIST09...")
-        from simpath.data.preprocess import preprocess_assistments
-        preprocess_assistments(raw_path, out_dir='data/processed/assist09')
+        from simpath.data.preprocess import preprocess_assist09
+        preprocess_assist09(raw_path, out_dir='data/processed/assist09')
 
     # Step 3: Train DKT
     dkt_path = 'outputs/checkpoints/pykt_dkt_best_assist09.pt'
