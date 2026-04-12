@@ -36,7 +36,7 @@
 \email{anonymous@anonymous.org}
 
 \begin{abstract}
-Personalized learning path recommendation (LPR) aims to identify an optimal sequence of knowledge concepts that maximizes a learner's mastery improvement. While reinforcement learning (RL) approaches have shown promise by interacting with knowledge evolution simulators, they suffer from \emph{cold-start exploration}---randomly initialized policies require extensive interaction to discover effective paths within the combinatorially large concept space. We propose \ours{}, a three-stage framework that addresses this challenge through \emph{evolutionary expert-guided initialization}. First, we employ an evolutionary algorithm with determinantal point process (DPP)-based diversity selection to generate a set of high-quality, diverse expert trajectories for each learner. Second, we distill these trajectories into a neural policy via behavioral cloning (BC). Third, we fine-tune the policy using proximal policy optimization (PPO), enabling it to surpass the evolutionary ceiling through online exploration. Experiments on two real-world educational datasets (ASSISTments 2009 and Junyi Academy) demonstrate that \ours{} achieves state-of-the-art effectiveness percentage (EP) scores, outperforming nine baselines including CSEAL, GEHRL, DLELP, and KnowLP. Notably, the BC-initialized policy converges up to $7\times$ faster than vanilla PPO while achieving substantially higher final performance.
+Personalized learning path recommendation (LPR) aims to identify an optimal sequence of knowledge concepts that maximizes a learner's mastery improvement. Reinforcement learning (RL) approaches interact with knowledge evolution simulators to learn recommendation policies, but face a fundamental \emph{search space explosion}: for $M$ concepts and path length $L$, the space of possible paths grows combinatorially, reaching $10^{38}$ for typical curricula with $L=20$. Randomly initialized policies cannot efficiently explore this space under sparse rewards. We propose \ours{}, a three-stage framework that tames this combinatorial challenge through \emph{evolutionary pre-exploration}. First, an evolutionary algorithm with diversity-regularized selection generates high-quality, diverse expert trajectories for each learner. Second, these trajectories are distilled into a neural policy via behavioral cloning (BC), compressing per-instance search results into a generalizable model. Third, proximal policy optimization (PPO) fine-tunes the policy through online interaction, discovering improvements beyond the evolutionary ceiling. Experiments on two real-world datasets (ASSISTments 2009 and Junyi Academy) with 10 baselines demonstrate that \ours{} achieves state-of-the-art effectiveness percentage (EP) scores and converges up to $7\times$ faster than vanilla PPO.
 \end{abstract}
 
 \begin{CCSXML}
@@ -94,9 +94,11 @@ Early LPR methods relied on heuristic rules such as prerequisite ordering~\cite{
 
 \subsection{Bridging Search and Policy Optimization}
 
-Hybrid evolutionary-gradient approaches have been explored in RL: ERL~\cite{khadka2018erl} co-evolves a population alongside a gradient-trained actor, population-based training~\cite{jaderberg2017pbt} evolves hyperparameters online, and evolutionary strategies~\cite{salimans2017es} replace gradient descent entirely. These methods use evolution to optimize the \emph{policy itself}. Our approach is structurally different: we use evolution to generate \emph{per-instance expert demonstrations}---personalized trajectories for each learner---and compress them into a generalizable policy via behavioral cloning~\cite{ross2011dagger,torabi2018bc}. The deployed policy is a lightweight MLP with no simulator dependency, making it suitable for real-time educational settings.
+The paradigm of initializing RL with demonstrations has been studied extensively in robotics. Rajeswaran et al.~\cite{rajeswaran2018dexterous} use human demonstrations to warm-start natural policy gradient for dexterous manipulation, and Nair et al.~\cite{nair2018demonstrations} augment replay buffers with demonstrations to overcome exploration in sparse-reward tasks. These works rely on \emph{pre-existing expert demonstrations} (e.g., human teleoperation), which are expensive to collect and domain-specific.
 
-This design is enabled by a key property of the LPR domain: the KES provides a \emph{zero-cost, deterministic simulator}. Evaluating a candidate path requires only $L$ forward passes through a small LSTM, making per-instance evolutionary search tractable. In contrast, robotics or game domains require expensive physical simulation per evaluation, prohibiting exhaustive per-instance search. This asymmetry---cheap evaluation but exponentially large search space---is precisely the setting where evolutionary demonstration generation excels: evolution handles the combinatorial search efficiently, while BC distills the results into a policy that generalizes to unseen learners at test time.
+Our approach differs in a fundamental way: we \emph{generate} demonstrations automatically via evolutionary search, eliminating the need for human experts. This is made possible by a key property of the LPR domain: the KES provides a \emph{zero-cost, deterministic simulator}. Evaluating a candidate path requires only $L$ forward passes through a small LSTM, making per-instance evolutionary search tractable---each learner's optimal path can be approximated through 60 candidates over 50 generations in under one second. In contrast, robotics domains require expensive physical simulation, making per-instance search infeasible.
+
+Hybrid evolutionary-gradient methods such as ERL~\cite{khadka2018erl} and population-based training~\cite{jaderberg2017pbt} integrate evolution into the RL training loop, but evolve the \emph{policy parameters} rather than generating per-instance demonstrations. Evolutionary strategies~\cite{salimans2017es} replace gradient descent entirely. Our approach occupies a different point in this design space: evolution operates at the \emph{solution level} (generating paths for individual learners), while gradient-based learning operates at the \emph{policy level} (generalizing across learners). This separation allows each component to operate in its natural regime.
 
 %% ============================================================
 \section{Preliminaries}
@@ -168,7 +170,7 @@ The evolutionary expert trajectories provide state--action pairs for supervised 
 \end{equation}
 where $\mathbf{g} \in \{0,1\}^M$ is the target mask and $a_t = p_t$ is the expert's action at step $t$.
 
-\paragraph{State design note.} The BC state uses the \emph{initial} mastery $\mathbf{h}_0$ (fixed across all steps), whereas PPO uses the \emph{current} mastery $\mathbf{h}_t$ (updated after each KES interaction). This deliberate simplification avoids $L$ KES calls per expert per BC epoch. It is justified because (a)~for short paths ($L=5$), intra-path mastery variation is small relative to inter-learner variance, and (b)~PPO corrects the resulting distribution mismatch through online interaction. We empirically verify in Section~6 that this approximation does not degrade final performance.
+\paragraph{State design note.} The BC state uses the \emph{initial} mastery $\mathbf{h}_0$ (fixed across all steps), whereas PPO uses the \emph{current} mastery $\mathbf{h}_t$ (updated after each KES interaction). This simplification avoids $L$ KES calls per expert per BC epoch, which would be prohibitively expensive for large expert sets. The step index $t/L$ provides the policy with positional information to compensate for the static mastery. Crucially, the PPO stage trains on the policy's own state distribution with live KES feedback, correcting any mismatch introduced by this approximation.
 
 The policy $\pi_\theta$ is trained to minimize the cross-entropy loss:
 \begin{equation}
@@ -311,11 +313,9 @@ BC + PPO (w/o DPP diversity) & --- & --- \\
 \section{Analysis}
 %% ============================================================
 
-\subsection{Why Does BC Initialization Help?}
+\subsection{Search Space Reduction and BC Initialization}
 
-The benefit of BC initialization extends beyond simple warm-starting. We identify three mechanisms through which the Evo$\to$BC pipeline improves PPO:
-
-\subsection{Search Space Reduction}
+The central design principle of \ours{} is \emph{progressive search space reduction}. We first quantify this reduction, then explain three mechanisms through which it accelerates PPO.
 
 The central advantage of \ours{} is the \emph{progressive reduction of the effective search space}. Consider the path space for $M=123$ concepts:
 \begin{center}
@@ -492,6 +492,16 @@ H.~Nakagawa, Y.~Iwasawa, and Y.~Matsuo.
 S.~Khadka and K.~Tumer.
 \newblock Evolution-guided policy gradient in reinforcement learning.
 \newblock In \emph{Advances in Neural Information Processing Systems (NeurIPS)}, pages 1196--1208, 2018.
+
+\bibitem{rajeswaran2018dexterous}
+A.~Rajeswaran, V.~Kumar, A.~Gupta, G.~Vezzani, J.~Schulman, E.~Todorov, and S.~Levine.
+\newblock Learning complex dexterous manipulation with deep reinforcement learning and demonstrations.
+\newblock In \emph{Proceedings of Robotics: Science and Systems (RSS)}, 2018.
+
+\bibitem{nair2018demonstrations}
+A.~Nair, B.~McGrew, M.~Andrychowicz, W.~Zaremba, and P.~Abbeel.
+\newblock Overcoming exploration in reinforcement learning with demonstrations.
+\newblock In \emph{IEEE International Conference on Robotics and Automation (ICRA)}, pages 6292--6299, 2018.
 
 \end{thebibliography}
 
