@@ -346,7 +346,25 @@ if __name__ == '__main__':
     p.add_argument('--dataset', default='all', choices=['assist09', 'junyi', 'all'])
     p.add_argument('--gpu', default='0')
     p.add_argument('--L', type=int, default=5, help='Path length for Evo experts (5, 10, 20)')
+    p.add_argument('--force', action='store_true', help='Delete cached files and regenerate everything')
     args = p.parse_args()
+
+    if args.force:
+        import glob
+        ds = args.dataset
+        patterns = []
+        if ds in ('assist09', 'all'):
+            patterns += ['outputs/concept_graph_dkt_assist09.pkl',
+                         'outputs/evo_dpk5_assist09_L*.pkl',
+                         'outputs/knowlp_graph_assist09*.pkl']
+        if ds in ('junyi', 'all'):
+            patterns += ['outputs/concept_graph_dkt_junyi.pkl',
+                         'outputs/evo_dpk5_junyi_L*.pkl',
+                         'outputs/knowlp_graph_junyi*.pkl']
+        for pat in patterns:
+            for f in glob.glob(pat):
+                os.remove(f)
+                print(f"  Deleted: {f}")
 
     if args.dataset in ('assist09', 'all'):
         setup_assist09(args.gpu, L=args.L)
