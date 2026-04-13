@@ -66,6 +66,44 @@ class EvoLearningMethod(BaseMethod):
             policy.load_state_dict(best_bc_state)
         print(f"  [{self.name}] BC Best Val = {best_bc:+.4f}", flush=True)
 
+        # ═══ Stage 1.5: Critic warm-start from expert trajectories ═══
+        print(f"  [{self.name}] Critic warm-start...", flush=True)
+        gamma_ws = 0.99
+        critic_s, critic_v = [], []
+        for ei, (mastery_exp, tgts_exp, path_exp, ep_exp, hc_exp, hr_exp) in enumerate(experts):
+            sc_exp, sr_exp = list(hc_exp), list(hr_exp)
+            for step in range(min(L, len(path_exp))):
+                # Simulate through KES to get ht for critic state
+                cur_m = kes.mastery(sc_exp, sr_exp)
+                critic_s.append(make_state_standard(cur_m, tgts_exp, step, L, NC))
+                # Return at step t = γ^(L-t) * EP (sparse terminal reward)
+                critic_v.append(gamma_ws ** (L - 1 - step) * ep_exp)
+                # Advance simulation
+                a = path_exp[step]
+                sc_exp.append(a); sr_exp.append(1 if cur_m[a] > 0.5 else 0)
+            if (ei + 1) % 1000 == 0:
+                print(f"    Critic prep: {ei+1}/{len(experts)}", flush=True)
+
+        critic_s_t = torch.tensor(np.array(critic_s), dtype=torch.float32, device=dev)
+        critic_v_t = torch.tensor(critic_v, dtype=torch.float32, device=dev)
+
+        # Train only critic_net + v head
+        critic_params = list(policy.critic_net.parameters()) + list(policy.v.parameters())
+        critic_opt = torch.optim.Adam(critic_params, lr=1e-3)
+        for epoch in range(1000):
+            idx = np.random.permutation(len(critic_s))
+            for i in range(0, len(idx), 512):
+                bi = idx[i:i + 512]
+                _, vals = policy(critic_s_t[bi])  # symmetric mode, critic sees same state
+                loss = F.mse_loss(vals, critic_v_t[bi])
+                critic_opt.zero_grad(); loss.backward(); critic_opt.step()
+            if (epoch + 1) % 500 == 0:
+                with torch.no_grad():
+                    _, v_pred = policy(critic_s_t[:1000])
+                mse = F.mse_loss(v_pred, critic_v_t[:1000]).item()
+                print(f"    Critic Ep {epoch+1}/1000 | MSE={mse:.4f}", flush=True)
+        print(f"  [{self.name}] Critic warm-start done", flush=True)
+
         # ═══ Stage 2: PPO fine-tune ═══
         print(f"  [{self.name}] PPO fine-tune ({n_episodes} ep)...", flush=True)
         lr = 1e-4; clip = 0.15; ent = 0.03; gamma = 0.99

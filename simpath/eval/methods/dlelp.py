@@ -121,33 +121,11 @@ class DLELPMethod(BaseMethod):
         print(f"  [{self.name}] Best Val = {bv:+.4f}")
 
     def predict(self, mastery, targets, kes=None, hc=None, hr=None):
-        """Inference with S-Agent (h0 mode: no KES during path generation)."""
+        """Inference: P-Agent only (S-Agent disabled in h0 mode — mastery doesn't
+        change between steps, so plateau detection always triggers falsely)."""
         self.policy.eval()
         path, used = [], set()
         for step in range(self.L):
-            if len(path) >= self.L:
-                break
-
-            # S-Agent: check plateau based on initial mastery
-            s_agent_fired = False
-            if step > 0 and len(path) > 0:
-                last_c = path[-1]
-                if mastery[last_c] < 0.5 + S_THRESHOLD:
-                    sims = self.graph.get_similar(last_c, top_k=10)
-                    for s in sims:
-                        if s not in used and mastery[s] < 0.7:
-                            path.append(s)
-                            used.add(s)
-                            s_agent_fired = True
-                            break
-
-            if s_agent_fired:
-                continue
-
-            if len(path) >= self.L:
-                break
-
-            # P-Agent: softmax over all concepts (only exclude used)
             state = make_state_dlelp(mastery, targets, self.num_c)
             vm = np.ones(self.num_c, dtype=np.float32)
             for c in used: vm[c] = 0
