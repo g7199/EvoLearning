@@ -4,17 +4,13 @@ import pickle
 from typing import List, Tuple, Optional
 
 
-DATA_SEED = 42  # Fixed seed for data split — NEVER changes across experiments
-
-
-def load_data(dataset_config: dict, seed: int = None, max_hist: int = 200):
+def load_data(dataset_config: dict, seed: int = 42, max_hist: int = 200):
     """
     Load and split dataset. Returns (train_data, val_data, test_data).
     Each item: (history_concepts, history_responses, target_concepts).
 
-    Data split uses FIXED seed (DATA_SEED=42) — same train/val/test across
-    all experiments. The `seed` parameter is ignored for splitting (kept for
-    backward compatibility).
+    Split uses the provided seed — different seeds produce different splits.
+    This ensures 3-seed experiments evaluate on different student populations.
 
     Split: 50% dataSim (DKT) / 50% dataOff (RL)
     dataOff: 80% train / 20% test
@@ -49,8 +45,8 @@ def load_data(dataset_config: dict, seed: int = None, max_hist: int = 200):
             except (ValueError, TypeError):
                 pass
 
-    # CSEAL split: 50% dataSim, 50% dataOff (FIXED seed for reproducibility)
-    np.random.seed(DATA_SEED)
+    # CSEAL split: 50% dataSim, 50% dataOff
+    np.random.seed(seed)
     perm = np.random.permutation(len(data['students']))
     off = [data['students'][i] for i in perm[len(perm) // 2:]]
 
@@ -58,8 +54,8 @@ def load_data(dataset_config: dict, seed: int = None, max_hist: int = 200):
     rl_train_raw = off[:int(len(off) * 0.8)]
     rl_test_raw = off[int(len(off) * 0.8):]
 
-    # Split test into val/test (FIXED seed — same split for ALL experiments)
-    np.random.seed(DATA_SEED + 81)  # = 123
+    # Split test into val/test
+    np.random.seed(seed + 81)
     tp = np.random.permutation(len(rl_test_raw))
     val_size = len(rl_test_raw) // 2
     val_raw = [rl_test_raw[i] for i in tp[:val_size]]

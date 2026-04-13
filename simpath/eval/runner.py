@@ -29,8 +29,8 @@ def run_single_method(config: ExperimentConfig, method_name: str, device: str):
     print(f"  {method_name} | {config.dataset} | L={config.L} | seed={config.seed} | {device}")
     print(f"{'='*60}")
 
-    # Load data (uses FIXED data seed internally — same split for all experiments)
-    train_data, val_data, test_data = load_data(ds)
+    # Load data (seed controls data split — different seeds produce different splits)
+    train_data, val_data, test_data = load_data(ds, seed=config.seed)
 
     # Set training seeds AFTER data loading (controls model init + training randomness)
     np.random.seed(config.seed)
