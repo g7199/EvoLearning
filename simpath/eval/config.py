@@ -20,7 +20,7 @@ DATASET_CONFIGS = {
         'num_c': 123,
         'hidden': 512,
         'dkt_path': 'outputs/checkpoints/pykt_dkt_best_assist09.pt',
-        'dkt_emb': 600,
+        'dkt_emb': 200,
         'graph_dkt_path': 'outputs/concept_graph_dkt_assist09.pkl',
         'graph_llm_path': 'outputs/concept_graph_assist09.pkl',
         'graph_thr': 0.25,
