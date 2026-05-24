@@ -1,0 +1,8 @@
+{
+  "method": "GRU4Rec",
+  "dataset": "assist09",
+  "L": 5,
+  "seed": 42,
+  "best_test_ep": 0.29020195923833947,
+  "latest_test_ep": 0.29020195923833947
+}

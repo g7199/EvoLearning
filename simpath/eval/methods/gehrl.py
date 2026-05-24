@@ -14,6 +14,7 @@ import time
 from simpath.eval.methods import register_method
 from simpath.eval.methods.base import BaseMethod, compute_ep_reward
 from simpath.eval.graph import get_goal_candidates
+from simpath.eval.kes import FastRollout
 
 MAX_TARGETS = 5
 
@@ -88,16 +89,15 @@ class GEHRLMethod(BaseMethod):
         sch_h = torch.optim.lr_scheduler.CosineAnnealingLR(opt_h, T_max=n_episodes, eta_min=1e-5)
         sch_l = torch.optim.lr_scheduler.CosineAnnealingLR(opt_l, T_max=n_episodes, eta_min=1e-5)
         bv = -999; t0 = time.time()
+        rollout = FastRollout(kes.dkt, NC, dev, kes.max_hist)
 
         for ep_i in range(n_episodes):
             indices = np.random.randint(0, len(train_data), size=batch_size)
             batch = [train_data[i] for i in indices]
             hc_b = [s[0] for s in batch]; hr_b = [s[1] for s in batch]; tgts_b = [s[2] for s in batch]
-            init_mastery_b = kes.batch_mastery(hc_b, hr_b)
+
+            init_mastery_b = rollout.init_batch(hc_b, hr_b, tgts_b, L)
             es_b = [init_mastery_b[i][tgts_b[i]].copy() for i in range(batch_size)]
-            sc_b = [list(hc_b[i]) for i in range(batch_size)]
-            sim_mastery_b = init_mastery_b.copy()
-            sr_b = [list(hr_b[i]) for i in range(batch_size)]
             used_b = [set() for _ in range(batch_size)]
 
             tgts_pad = np.zeros((batch_size, MAX_TARGETS), dtype=np.int64)
@@ -111,15 +111,16 @@ class GEHRLMethod(BaseMethod):
             ah_rew, al_rew = [], []
 
             for step in range(L):
-                # High-level
-                hs, hvm = [], []
-                for i in range(batch_size):
-                    tm = init_mastery_b[i][tgts_pad[i]]
-                    tg = 1.0 - tm
-                    hs.append(torch.tensor(np.concatenate([init_mastery_b[i], tm, tg, [step/L]]),
-                                           dtype=torch.float32, device=dev))
-                    hvm.append(torch.tensor(tgts_mask[i], dtype=torch.float32, device=dev))
-                hs_b = torch.stack(hs); hvm_b = torch.stack(hvm)
+                # High-level state: mastery + target_mastery + target_gap + step
+                init_m = rollout.init_mastery
+                tm = init_m[np.arange(batch_size)[:, None], tgts_pad]
+                tg = 1.0 - tm
+                sf_h = np.full((batch_size, 1), step / L, dtype=np.float32)
+                hs_np = np.concatenate([init_m.astype(np.float32), tm.astype(np.float32),
+                                        tg.astype(np.float32), sf_h], axis=1)
+                hs_b = torch.from_numpy(hs_np).to(dev)
+                hvm_b = torch.from_numpy(tgts_mask).to(dev)
+
                 h_lo, h_v = self.high(hs_b, hvm_b)
                 h_p = F.softmax(h_lo, dim=-1).clamp(min=1e-8)
                 h_d = torch.distributions.Categorical(h_p)
@@ -128,34 +129,42 @@ class GEHRLMethod(BaseMethod):
                 goals = [tgts_pad[i, min(gi[i], min(len(tgts_b[i])-1, MAX_TARGETS-1))]
                          for i in range(batch_size)]
 
-                # Low-level
-                ls, lvm = [], []
+                # Low-level state: mastery + goal_onehot + step
+                goh = np.zeros((batch_size, NC), dtype=np.float32)
                 for i in range(batch_size):
-                    goh = np.zeros(NC, dtype=np.float32); goh[goals[i]] = 1.0
-                    ls.append(torch.tensor(np.concatenate([init_mastery_b[i], goh, [step/L]]),
-                                           dtype=torch.float32, device=dev))
-                    cands = get_goal_candidates(goals[i], init_mastery_b[i], graph, NC, used_b[i], cap=20)
-                    vm = np.zeros(NC, dtype=np.float32)
-                    for c in cands: vm[c] = 1.0
-                    if vm.sum() == 0:
-                        for c in range(NC):
-                            if c not in used_b[i]: vm[c] = 1.0
-                    lvm.append(torch.tensor(vm, dtype=torch.float32, device=dev))
-                ls_b = torch.stack(ls); lvm_b = torch.stack(lvm)
+                    goh[i, goals[i]] = 1.0
+                sf_l = np.full((batch_size, 1), step / L, dtype=np.float32)
+                ls_np = np.concatenate([init_m.astype(np.float32), goh, sf_l], axis=1)
+                ls_b = torch.from_numpy(ls_np).to(dev)
+
+                # Low-level valid mask: graph candidates per goal (built on CPU)
+                lvm_np = np.zeros((batch_size, NC), dtype=np.float32)
+                for i in range(batch_size):
+                    cands = get_goal_candidates(goals[i], init_m[i], self.graph, NC, used_b[i], cap=20)
+                    if cands:
+                        lvm_np[i, list(cands)] = 1.0
+                    if lvm_np[i].sum() == 0:
+                        all_c = [c for c in range(NC) if c not in used_b[i]]
+                        if all_c:
+                            lvm_np[i, all_c] = 1.0
+                lvm_b = torch.from_numpy(lvm_np).to(dev)
+
                 l_lo, l_v = self.low(ls_b, lvm_b)
                 l_p = F.softmax(l_lo, dim=-1).clamp(min=1e-8)
                 l_d = torch.distributions.Categorical(l_p)
                 l_a = l_d.sample(); l_lp = l_d.log_prob(l_a)
 
                 anp = l_a.cpu().numpy()
-                old_m = sim_mastery_b.copy()
+                old_m = rollout.sim_mastery.copy()
+
                 for i in range(batch_size):
-                    a = anp[i]; sc_b[i].append(a)
-                    sr_b[i].append(1 if sim_mastery_b[i][a] > 0.5 else 0); used_b[i].add(a)
-                sim_mastery_b = kes.batch_mastery(sc_b, sr_b)
+                    used_b[i].add(anp[i])
+
+                sim_mastery_b = rollout.step(anp)
 
                 # Test-based internal reward (low-level)
-                lr_arr = np.array([sim_mastery_b[i][goals[i]] - old_m[i][goals[i]] for i in range(batch_size)])
+                lr_arr = np.array([sim_mastery_b[i][goals[i]] - old_m[i][goals[i]]
+                                   for i in range(batch_size)], dtype=np.float32)
                 # External reward (high-level)
                 hr_arr = np.zeros(batch_size, dtype=np.float32)
                 if step == L - 1:

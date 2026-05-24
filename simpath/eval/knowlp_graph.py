@@ -177,6 +177,8 @@ def extract_relationships(descriptions: Dict[int, str], concept_names: Dict[int,
                     prereqs = json.loads(match.group())
                     for k, v in prereqs.items():
                         c = int(k)
+                        if not (0 <= c < num_c):
+                            continue
                         for p in v:
                             p = int(p)
                             if 0 <= p < num_c and p != c:
@@ -205,6 +207,8 @@ def extract_relationships(descriptions: Dict[int, str], concept_names: Dict[int,
                     sims = json.loads(match.group())
                     for k, v in sims.items():
                         c = int(k)
+                        if not (0 <= c < num_c):
+                            continue
                         for s in v:
                             s = int(s)
                             if 0 <= s < num_c and s != c:

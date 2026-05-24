@@ -1,0 +1,8 @@
+{
+  "method": "EvoLearning-BC",
+  "dataset": "junyi",
+  "L": 20,
+  "seed": 7,
+  "best_test_ep": 0.4272840617052279,
+  "latest_test_ep": 0.4272840617052279
+}

@@ -1,0 +1,8 @@
+{
+  "method": "EvoLearning-AWR",
+  "dataset": "junyi",
+  "L": 10,
+  "seed": 7,
+  "best_test_ep": 0.3896797406607511,
+  "latest_test_ep": 0.3896797406607511
+}

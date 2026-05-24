@@ -87,8 +87,10 @@ class GRU4RecMethod(BaseMethod):
         ga = torch.tensor(all_target, dtype=torch.long, device=self.device)
         gsf = torch.tensor([[s / L for s in range(L)]] * N, dtype=torch.float32, device=self.device)
 
-        n_epochs = 5000
+        n_epochs = 2000
+        best_val = -999; best_state = None
         for epoch in range(n_epochs):
+            model.train()
             idx = np.random.permutation(N)
             for i in range(0, N, 64):
                 bi = idx[i:i + 64]
@@ -100,9 +102,22 @@ class GRU4RecMethod(BaseMethod):
                 opt.step()
             if (epoch + 1) % 5 == 0:
                 self._update_progress(out_dir, epoch+1, n_epochs, reward=loss.item())
-            if (epoch + 1) % 1000 == 0:
-                acc = (logits.argmax(-1) == ga[bi]).float().mean().item()
-                print(f"    [{self.name}] Epoch {epoch+1}/{n_epochs} | Acc={acc:.4f}", flush=True)
+            if (epoch + 1) % 200 == 0:
+                model.eval()
+                eps = kes.evaluate_batch(val_data,
+                    lambda m, t, k, hc, hr: self.predict(m, t, k, hc, hr))
+                vep = np.mean(eps); mk = ''
+                if vep > best_val:
+                    best_val = vep
+                    best_state = {k: v.clone() for k, v in model.state_dict().items()}
+                    mk = ' ***'
+                print(f"    [{self.name}] Epoch {epoch+1}/{n_epochs} | Val={vep:+.4f}{mk}", flush=True)
+                self._update_progress(out_dir, epoch+1, n_epochs, val=vep)
+
+        if best_state:
+            model.load_state_dict(best_state)
+            self._best_state = best_state
+        print(f"  [{self.name}] Best Val = {best_val:+.4f}", flush=True)
 
     def predict(self, mastery, targets, kes=None, hc=None, hr=None):
         return self.model.generate(mastery, targets, self.L)

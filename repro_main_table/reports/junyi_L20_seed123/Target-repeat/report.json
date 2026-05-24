@@ -1,0 +1,8 @@
+{
+  "method": "Target-repeat",
+  "dataset": "junyi",
+  "L": 20,
+  "seed": 123,
+  "best_test_ep": 0.28340899009630083,
+  "latest_test_ep": 0.28340899009630083
+}

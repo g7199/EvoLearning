@@ -1,0 +1,8 @@
+{
+  "method": "EvoLearning-AWR",
+  "dataset": "assist15",
+  "L": 5,
+  "seed": 7,
+  "best_test_ep": 0.471899852691926,
+  "latest_test_ep": 0.471899852691926
+}

@@ -15,7 +15,7 @@ from tqdm import tqdm
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("stage", choices=["preprocess", "train", "all"])
-    p.add_argument("--max_students", type=int, default=10000)
+    p.add_argument("--max_students", type=int, default=20000)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     return p.parse_args()

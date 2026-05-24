@@ -1,0 +1,8 @@
+{
+  "method": "PPO-vanilla",
+  "dataset": "ednet",
+  "L": 5,
+  "seed": 123,
+  "best_test_ep": 0.26001640165738116,
+  "latest_test_ep": 0.26001640165738116
+}

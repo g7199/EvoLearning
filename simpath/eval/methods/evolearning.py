@@ -1,19 +1,24 @@
-"""EvoLearning — Evo expert generation → BC → PPO fine-tune."""
+"""EvoLearning-DAPG — BC init → DAPG fine-tune (Rajeswaran et al. 2018).
+
+Stage 1: BC + Critic warm-start (shared with EvoLearning-BC).
+Stage 2: DAPG — PPO + decaying BC loss on expert demos.
+"""
 import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-import pickle, os, time
+import time
 from simpath.eval.methods import register_method
 from simpath.eval.methods.base import (
-    BaseMethod, PolicyNet, make_state_standard, run_ppo_epoch, compute_ep_reward
+    BaseMethod, PolicyNet, make_state_standard, run_dapg_epoch, compute_ep_reward
 )
+from simpath.eval.kes import FastRollout
 
 
 @register_method
-class EvoLearningMethod(BaseMethod):
-    name = "EvoLearning"
+class EvoLearningDAPGMethod(BaseMethod):
+    name = "EvoLearning-DAPG"
     needs_experts = True
     needs_training = True
 
@@ -22,12 +27,10 @@ class EvoLearningMethod(BaseMethod):
         state_dim = self.num_c * 2 + 1
         self.policy = PolicyNet(state_dim, self.num_c, self.hidden).to(self.device)
 
-    def train(self, train_data, val_data, kes, graph, experts,
-              n_episodes=30000, batch_size=128, val_interval=2000, out_dir=None, **kwargs):
-        policy = self.policy
-        NC = self.num_c; L = self.L; dev = self.device
+    def _run_bc_and_critic(self, policy, kes, val_data, experts, out_dir):
+        """BC + critic warm-start. Shared with EvoLearning-BC."""
+        NC = self.num_c; L = self.L; dev = self.device; gamma = 0.99
 
-        # ═══ Stage 1: BC on expert trajectories (h0: initial mastery) ═══
         print(f"  [{self.name}] BC on {len(experts)} experts...", flush=True)
         bc_s, bc_a = [], []
         for mastery, tgts, path, ep, *_ in experts:
@@ -36,67 +39,72 @@ class EvoLearningMethod(BaseMethod):
                 bc_a.append(action)
         bc_s_t = torch.tensor(np.array(bc_s), dtype=torch.float32, device=dev)
         bc_a_t = torch.tensor(bc_a, dtype=torch.long, device=dev)
-        bc_opt = torch.optim.Adam(policy.parameters(), lr=1e-3, weight_decay=1e-4)
+        bc_opt = torch.optim.Adam(
+            list(policy.actor_net.parameters()) + list(policy.pi.parameters()),
+            lr=1e-3, weight_decay=1e-4)
 
-        # Total = BC(5000) + PPO(n_episodes), so tqdm shows combined progress
-        bc_epochs = 5000
-        total_steps = bc_epochs + n_episodes
-
+        bc_epochs = 2000
         best_bc = -999; best_bc_state = None
+        N_bc = len(bc_s); BC_BATCH = 4096
         for epoch in range(bc_epochs):
-            idx = np.random.permutation(len(bc_s))
-            for i in range(0, len(idx), 512):
-                bi = idx[i:i + 512]
-                lo, _ = policy(bc_s_t[bi])
+            idx = torch.randperm(N_bc, device=dev)
+            for i in range(0, N_bc, BC_BATCH):
+                bi = idx[i:i + BC_BATCH]
+                h = policy.actor_net(bc_s_t[bi])
+                lo = policy.pi(h)
                 loss = F.cross_entropy(lo, bc_a_t[bi])
                 bc_opt.zero_grad(); loss.backward(); bc_opt.step()
-            if (epoch + 1) % 5 == 0:
-                self._update_progress(out_dir, epoch+1, total_steps, reward=loss.item())
-            if (epoch + 1) % 500 == 0:
+            if (epoch + 1) % 200 == 0:
                 policy.eval()
-                eps = kes.evaluate_batch(val_data, lambda m, t, k, hc, hr: self.predict(m, t, k, hc, hr))
+                eps = kes.evaluate_policy_batch(val_data, policy, L)
                 vep = np.mean(eps); mk = ''
                 if vep > best_bc:
                     best_bc = vep; best_bc_state = {k: v.clone() for k, v in policy.state_dict().items()}; mk = ' ***'
                 print(f"    BC Ep {epoch+1}/{bc_epochs} | Val={vep:+.4f}{mk}", flush=True)
-                self._update_progress(out_dir, epoch+1, total_steps, val=vep)
                 policy.train()
-
         if best_bc_state:
             policy.load_state_dict(best_bc_state)
         print(f"  [{self.name}] BC Best Val = {best_bc:+.4f}", flush=True)
 
-        # ═══ Stage 1.5: Critic warm-start from expert trajectories ═══
+        # Critic warm-start (GPU-batched simulation)
         print(f"  [{self.name}] Critic warm-start...", flush=True)
-        gamma_ws = 0.99
+        from simpath.eval.kes import FastRollout
+        rollout_cw = FastRollout(kes.dkt, NC, dev, kes.max_hist)
         critic_s, critic_v = [], []
-        for ei, (mastery_exp, tgts_exp, path_exp, ep_exp, hc_exp, hr_exp) in enumerate(experts):
-            sc_exp, sr_exp = list(hc_exp), list(hr_exp)
-            for step in range(min(L, len(path_exp))):
-                # Simulate through KES to get ht for critic state
-                cur_m = kes.mastery(sc_exp, sr_exp)
-                critic_s.append(make_state_standard(cur_m, tgts_exp, step, L, NC))
-                # Return at step t = γ^(L-t) * EP (sparse terminal reward)
-                critic_v.append(gamma_ws ** (L - 1 - step) * ep_exp)
-                # Advance simulation
-                a = path_exp[step]
-                sc_exp.append(a); sr_exp.append(1 if cur_m[a] > 0.5 else 0)
-            if (ei + 1) % 1000 == 0:
-                print(f"    Critic prep: {ei+1}/{len(experts)}", flush=True)
+        CHUNK = 256
+        for i0 in range(0, len(experts), CHUNK):
+            chunk = experts[i0:i0 + CHUNK]
+            hc_b = [e[4] for e in chunk]
+            hr_b = [e[5] for e in chunk]
+            tgts_b = [e[1] for e in chunk]
+            paths_b = [list(e[2][:L]) for e in chunk]
+            eps_b = [e[3] for e in chunk]
+            Bc = len(chunk)
 
+            sim_m = rollout_cw.init_batch(hc_b, hr_b, tgts_b, L)
+            for step in range(L):
+                for b in range(Bc):
+                    if step < len(paths_b[b]):
+                        critic_s.append(make_state_standard(sim_m[b], tgts_b[b], step, L, NC))
+                        critic_v.append(gamma ** (L - 1 - step) * eps_b[b])
+                actions = np.array([paths_b[b][step] if step < len(paths_b[b]) else 0
+                                    for b in range(Bc)], dtype=np.int64)
+                sim_m = rollout_cw.step(actions)
+            if (i0 + CHUNK) % 2048 < CHUNK:
+                print(f"    Critic prep: {min(i0+CHUNK, len(experts))}/{len(experts)}", flush=True)
         critic_s_t = torch.tensor(np.array(critic_s), dtype=torch.float32, device=dev)
         critic_v_t = torch.tensor(critic_v, dtype=torch.float32, device=dev)
-
-        # Train only critic_net + v head
         critic_params = list(policy.critic_net.parameters()) + list(policy.v.parameters())
         critic_opt = torch.optim.Adam(critic_params, lr=1e-3)
+        N_cw = len(critic_s); CW_BATCH = 4096
         for epoch in range(1000):
-            idx = np.random.permutation(len(critic_s))
-            for i in range(0, len(idx), 512):
-                bi = idx[i:i + 512]
-                _, vals = policy(critic_s_t[bi])  # symmetric mode, critic sees same state
-                loss = F.mse_loss(vals, critic_v_t[bi])
-                critic_opt.zero_grad(); loss.backward(); critic_opt.step()
+            idx = torch.randperm(N_cw, device=dev)
+            for i in range(0, N_cw, CW_BATCH):
+                bi = idx[i:i + CW_BATCH]
+                h = policy.critic_net(critic_s_t[bi])
+                vals = policy.v(h).squeeze(-1)
+                l = F.mse_loss(vals, critic_v_t[bi])
+                critic_opt.zero_grad(); l.backward(); critic_opt.step()
             if (epoch + 1) % 500 == 0:
                 with torch.no_grad():
                     _, v_pred = policy(critic_s_t[:1000])
@@ -104,50 +112,72 @@ class EvoLearningMethod(BaseMethod):
                 print(f"    Critic Ep {epoch+1}/1000 | MSE={mse:.4f}", flush=True)
         print(f"  [{self.name}] Critic warm-start done", flush=True)
 
-        # ═══ Stage 2: PPO fine-tune ═══
-        print(f"  [{self.name}] PPO fine-tune ({n_episodes} ep)...", flush=True)
-        lr = 1e-4; clip = 0.15; ent = 0.03; gamma = 0.99
+    def train(self, train_data, val_data, kes, graph, experts,
+              n_episodes=30000, batch_size=128, val_interval=2000, out_dir=None, **kwargs):
+        policy = self.policy
+        NC = self.num_c; L = self.L; dev = self.device
+        gamma = 0.99
+
+        # ═══ Stage 1: Load shared BC+critic checkpoint, or run BC ═══
+        shared_ckpt = None
+        if out_dir:
+            shared_ckpt = os.path.join(os.path.dirname(out_dir), '_bc_critic_init.pt')
+        if shared_ckpt and os.path.exists(shared_ckpt):
+            policy.load_state_dict(torch.load(shared_ckpt, weights_only=True, map_location=dev))
+            print(f"  [{self.name}] Loaded shared BC+critic init: {shared_ckpt}", flush=True)
+        else:
+            self._run_bc_and_critic(policy, kes, val_data, experts, out_dir)
+            if shared_ckpt:
+                torch.save(policy.state_dict(), shared_ckpt)
+
+        # Prepare demo data for DAPG (expert h0 states + actions)
+        dapg_s, dapg_a = [], []
+        for mastery, tgts, path, ep, *_ in experts:
+            for step, action in enumerate(path[:L]):
+                dapg_s.append(make_state_standard(mastery, tgts, step, L, NC))
+                dapg_a.append(action)
+        dapg_s_t = torch.tensor(np.array(dapg_s), dtype=torch.float32, device=dev)
+        dapg_a_t = torch.tensor(dapg_a, dtype=torch.long, device=dev)
+
+        # ═══ Stage 2: DAPG fine-tune (PPO + decaying BC) ═══
+        print(f"  [{self.name}] DAPG fine-tune ({n_episodes} ep)...", flush=True)
+        lr = 1e-4; clip = 0.15; ent = 0.03
+        lambda_0 = 0.05; lambda_decay = 0.999
         opt = torch.optim.Adam(policy.parameters(), lr=lr)
         sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=n_episodes, eta_min=1e-6)
         bv = -999; t0 = time.time()
+        rollout = FastRollout(kes.dkt, NC, dev, kes.max_hist)
 
         for ep_i in range(n_episodes):
             indices = np.random.randint(0, len(train_data), size=batch_size)
             batch = [train_data[i] for i in indices]
             hc_b = [s[0] for s in batch]; hr_b = [s[1] for s in batch]; tgts_b = [s[2] for s in batch]
-            init_mastery_b = kes.batch_mastery(hc_b, hr_b)
+
+            init_mastery_b = rollout.init_batch(hc_b, hr_b, tgts_b, L)
             es_b = [init_mastery_b[i][tgts_b[i]].copy() for i in range(batch_size)]
-            sc_b = [list(hc_b[i]) for i in range(batch_size)]
-            sr_b = [list(hr_b[i]) for i in range(batch_size)]
-            sim_mastery_b = init_mastery_b.copy()
             used_b = [set() for _ in range(batch_size)]
             all_s, all_sc, all_a, all_lp, all_v, all_vm, all_rew = [], [], [], [], [], [], []
 
             for step in range(L):
-                sb, scb, vmb = [], [], []
+                s_actor, s_critic = rollout.make_states(step)
+                vm_np = np.ones((batch_size, NC), dtype=np.float32)
                 for i in range(batch_size):
-                    s = torch.tensor(make_state_standard(init_mastery_b[i], tgts_b[i], step, L, NC),
-                                     dtype=torch.float32, device=dev)
-                    sc = torch.tensor(make_state_standard(sim_mastery_b[i], tgts_b[i], step, L, NC),
-                                      dtype=torch.float32, device=dev)
-                    vm = torch.ones(NC, device=dev)
-                    for c in used_b[i]: vm[c] = 0
-                    sb.append(s); scb.append(sc); vmb.append(vm)
-                st_b = torch.stack(sb); sct_b = torch.stack(scb); vm_b = torch.stack(vmb)
-                logits, vals = policy(st_b, sct_b, vm_b)
+                    for c in used_b[i]: vm_np[i, c] = 0
+                vm = torch.from_numpy(vm_np).to(dev)
+
+                logits, vals = policy(s_actor, s_critic, vm)
                 probs = F.softmax(logits, dim=-1).clamp(min=1e-8)
                 dist = torch.distributions.Categorical(probs)
                 actions = dist.sample(); lps = dist.log_prob(actions)
                 anp = actions.cpu().numpy()
-                for i in range(batch_size):
-                    a = anp[i]; sc_b[i].append(a)
-                    sr_b[i].append(1 if sim_mastery_b[i][a] > 0.5 else 0); used_b[i].add(a)
-                sim_mastery_b = kes.batch_mastery(sc_b, sr_b)
+                for i in range(batch_size): used_b[i].add(anp[i])
+                sim_mastery_b = rollout.step(anp)
+
                 rewards = np.zeros(batch_size, dtype=np.float32)
                 if step == L - 1:
                     rewards = compute_ep_reward(sim_mastery_b, tgts_b, es_b, batch_size)
-                all_s.append(st_b); all_sc.append(sct_b); all_a.append(actions)
-                all_lp.append(lps); all_v.append(vals); all_vm.append(vm_b); all_rew.append(rewards)
+                all_s.append(s_actor); all_sc.append(s_critic); all_a.append(actions)
+                all_lp.append(lps); all_v.append(vals); all_vm.append(vm); all_rew.append(rewards)
 
             G = np.zeros(batch_size, dtype=np.float32); rets = [None] * L
             for t in reversed(range(L)): G = all_rew[t] + gamma * G; rets[t] = G.copy()
@@ -155,24 +185,28 @@ class EvoLearningMethod(BaseMethod):
             olp = torch.cat(all_lp).detach()
             ret = torch.tensor(np.concatenate(rets), dtype=torch.float32, device=dev)
             ov = torch.cat(all_v).detach(); vm_t = torch.cat(all_vm)
-            run_ppo_epoch(policy, st, at, olp, ret, ov, vm_t, opt, clip, ent, critic_states=sct)
+
+            lambda_bc = lambda_0 * (lambda_decay ** ep_i)
+            run_dapg_epoch(policy, st, at, olp, ret, ov, vm_t, opt, clip, ent,
+                           dapg_s_t, dapg_a_t, lambda_bc, critic_states=sct)
             sched.step()
 
             if (ep_i + 1) % 5 == 0:
-                self._update_progress(out_dir, bc_epochs + ep_i+1, total_steps, reward=all_rew[-1].mean())
+                self._update_progress(out_dir, ep_i+1, n_episodes, reward=all_rew[-1].mean())
             if (ep_i + 1) % val_interval == 0:
                 policy.eval()
-                eps = kes.evaluate_batch(val_data, lambda m, t, k, hc, hr: self.predict(m, t, k, hc, hr))
+                eps = kes.evaluate_policy_batch(val_data, policy, L)
                 vep = np.mean(eps); mk = ''
                 if vep > bv:
                     bv = vep; self._best_state = {k: v.clone() for k, v in policy.state_dict().items()}
                     mk = ' *** SAVED'
+                lam_now = lambda_0 * (lambda_decay ** (ep_i + 1))
                 print(f"  [{self.name}] Ep {ep_i+1}/{n_episodes} | "
-                      f"Val({len(val_data)})={vep:+.4f}{mk} | {time.time()-t0:.0f}s", flush=True)
-                self._update_progress(out_dir, bc_epochs + ep_i+1, total_steps, val=vep)
+                      f"Val({len(val_data)})={vep:+.4f} | λ={lam_now:.4f}{mk} | {time.time()-t0:.0f}s",
+                      flush=True)
+                self._update_progress(out_dir, ep_i+1, n_episodes, val=vep)
                 if out_dir:
-                    torch.save(policy.state_dict(),
-                               os.path.join(out_dir, f'checkpoint_ep{ep_i+1}.pt'))
+                    torch.save(policy.state_dict(), os.path.join(out_dir, f'checkpoint_ep{ep_i+1}.pt'))
                 policy.train()
 
         if hasattr(self, '_best_state') and self._best_state:

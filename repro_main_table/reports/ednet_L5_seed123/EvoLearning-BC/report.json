@@ -1,0 +1,8 @@
+{
+  "method": "EvoLearning-BC",
+  "dataset": "ednet",
+  "L": 5,
+  "seed": 123,
+  "best_test_ep": 0.273195595943071,
+  "latest_test_ep": 0.273195595943071
+}

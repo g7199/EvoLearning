@@ -1,0 +1,8 @@
+{
+  "method": "SASRec",
+  "dataset": "junyi",
+  "L": 5,
+  "seed": 7,
+  "best_test_ep": 0.26435026414925233,
+  "latest_test_ep": 0.26435026414925233
+}

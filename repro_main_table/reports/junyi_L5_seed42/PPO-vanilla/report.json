@@ -1,0 +1,8 @@
+{
+  "method": "PPO-vanilla",
+  "dataset": "junyi",
+  "L": 5,
+  "seed": 42,
+  "best_test_ep": 0.23586767794855404,
+  "latest_test_ep": 0.23586767794855404
+}

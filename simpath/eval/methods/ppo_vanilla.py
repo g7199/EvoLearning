@@ -9,6 +9,7 @@ from simpath.eval.methods import register_method
 from simpath.eval.methods.base import (
     BaseMethod, PolicyNet, make_state_standard, run_ppo_epoch, compute_ep_reward
 )
+from simpath.eval.kes import FastRollout
 
 
 @register_method
@@ -29,46 +30,43 @@ class PPOVanillaMethod(BaseMethod):
         opt = torch.optim.Adam(policy.parameters(), lr=lr)
         sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=n_episodes, eta_min=1e-5)
         bv = -999; t0 = time.time()
+        rollout = FastRollout(kes.dkt, NC, dev, kes.max_hist)
 
         for ep_i in range(n_episodes):
             indices = np.random.randint(0, len(train_data), size=batch_size)
             batch = [train_data[i] for i in indices]
             hc_b = [s[0] for s in batch]; hr_b = [s[1] for s in batch]; tgts_b = [s[2] for s in batch]
-            init_mastery_b = kes.batch_mastery(hc_b, hr_b)  # h0: fixed for state
+
+            init_mastery_b = rollout.init_batch(hc_b, hr_b, tgts_b, L)
             es_b = [init_mastery_b[i][tgts_b[i]].copy() for i in range(batch_size)]
-            sc_b = [list(hc_b[i]) for i in range(batch_size)]
-            sr_b = [list(hr_b[i]) for i in range(batch_size)]
-            sim_mastery_b = init_mastery_b.copy()  # ht: evolves for reward
             used_b = [set() for _ in range(batch_size)]
             all_s, all_sc, all_a, all_lp, all_v, all_vm, all_rew = [], [], [], [], [], [], []
 
             for step in range(L):
-                sb, scb, vmb = [], [], []
+                s_actor, s_critic = rollout.make_states(step)
+
+                # Valid mask
+                vm_np = np.ones((batch_size, NC), dtype=np.float32)
                 for i in range(batch_size):
-                    # Actor state: h0 (no peeking)
-                    s = torch.tensor(make_state_standard(init_mastery_b[i], tgts_b[i], step, L, NC),
-                                     dtype=torch.float32, device=dev)
-                    # Critic state: ht (privileged, for better value estimation)
-                    sc = torch.tensor(make_state_standard(sim_mastery_b[i], tgts_b[i], step, L, NC),
-                                      dtype=torch.float32, device=dev)
-                    vm = torch.ones(NC, device=dev)
-                    for c in used_b[i]: vm[c] = 0
-                    sb.append(s); scb.append(sc); vmb.append(vm)
-                st_b = torch.stack(sb); sct_b = torch.stack(scb); vm_b = torch.stack(vmb)
-                logits, vals = policy(st_b, sct_b, vm_b)
+                    for c in used_b[i]: vm_np[i, c] = 0
+                vm = torch.from_numpy(vm_np).to(dev)
+
+                logits, vals = policy(s_actor, s_critic, vm)
                 probs = F.softmax(logits, dim=-1).clamp(min=1e-8)
                 dist = torch.distributions.Categorical(probs)
                 actions = dist.sample(); lps = dist.log_prob(actions)
                 anp = actions.cpu().numpy()
+
                 for i in range(batch_size):
-                    a = anp[i]; sc_b[i].append(a)
-                    sr_b[i].append(1 if sim_mastery_b[i][a] > 0.5 else 0); used_b[i].add(a)
-                sim_mastery_b = kes.batch_mastery(sc_b, sr_b)  # ht for reward only
+                    used_b[i].add(anp[i])
+
+                sim_mastery_b = rollout.step(anp)
+
                 rewards = np.zeros(batch_size, dtype=np.float32)
                 if step == L - 1:
                     rewards = compute_ep_reward(sim_mastery_b, tgts_b, es_b, batch_size)
-                all_s.append(st_b); all_sc.append(sct_b); all_a.append(actions)
-                all_lp.append(lps); all_v.append(vals); all_vm.append(vm_b); all_rew.append(rewards)
+                all_s.append(s_actor); all_sc.append(s_critic); all_a.append(actions)
+                all_lp.append(lps); all_v.append(vals); all_vm.append(vm); all_rew.append(rewards)
 
             G = np.zeros(batch_size, dtype=np.float32); rets = [None] * L
             for t in reversed(range(L)): G = all_rew[t] + gamma * G; rets[t] = G.copy()
@@ -91,7 +89,6 @@ class PPOVanillaMethod(BaseMethod):
                 print(f"  [{self.name}] Ep {ep_i+1}/{n_episodes} | "
                       f"Val({len(val_data)})={vep:+.4f}{mk} | {time.time()-t0:.0f}s", flush=True)
                 self._update_progress(out_dir, ep_i+1, n_episodes, val=vep)
-                # Save periodic checkpoint
                 if out_dir:
                     torch.save(policy.state_dict(),
                                os.path.join(out_dir, f'checkpoint_ep{ep_i+1}.pt'))

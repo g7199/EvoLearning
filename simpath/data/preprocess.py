@@ -204,7 +204,7 @@ def preprocess_assistments(raw_path: str, out_dir: str = None) -> str:
     questions_meta = _build_assistments_questions(df)
 
     result = _common_preprocess(df, questions_meta, "assistments",
-                                min_interactions=20, max_interactions=5000)
+                                min_interactions=10, max_interactions=5000)
 
     with open(out_file, "wb") as f:
         pickle.dump(result, f)

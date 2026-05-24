@@ -1,0 +1,8 @@
+{
+  "method": "EvoLearning-AWR",
+  "dataset": "ednet",
+  "L": 10,
+  "seed": 42,
+  "best_test_ep": 0.37751409004065745,
+  "latest_test_ep": 0.37751409004065745
+}

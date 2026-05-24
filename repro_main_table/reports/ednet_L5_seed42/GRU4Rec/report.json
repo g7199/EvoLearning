@@ -1,0 +1,8 @@
+{
+  "method": "GRU4Rec",
+  "dataset": "ednet",
+  "L": 5,
+  "seed": 42,
+  "best_test_ep": 0.18729054938788176,
+  "latest_test_ep": 0.18729054938788176
+}

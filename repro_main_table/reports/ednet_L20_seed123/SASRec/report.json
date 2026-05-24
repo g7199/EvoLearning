@@ -1,0 +1,8 @@
+{
+  "method": "SASRec",
+  "dataset": "ednet",
+  "L": 20,
+  "seed": 123,
+  "best_test_ep": 0.2634991003912021,
+  "latest_test_ep": 0.2634991003912021
+}

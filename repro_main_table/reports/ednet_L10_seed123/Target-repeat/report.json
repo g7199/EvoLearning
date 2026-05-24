@@ -1,0 +1,8 @@
+{
+  "method": "Target-repeat",
+  "dataset": "ednet",
+  "L": 10,
+  "seed": 123,
+  "best_test_ep": 0.13696499255710656,
+  "latest_test_ep": 0.13696499255710656
+}

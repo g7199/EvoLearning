@@ -1,0 +1,9 @@
+# No dependencies.
+#
+# repro_main_table/aggregate_main_table.py is pure Python 3 standard
+# library (json, argparse, pathlib). It needs only a Python 3.10+
+# interpreter -- there is nothing to pip install. The slim reports and
+# the override file it reads are bundled in this folder.
+#
+# For the FULL EVOL pipeline (training/evaluation), use the requirements.txt
+# at the repository root instead.

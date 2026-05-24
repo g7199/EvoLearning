@@ -150,6 +150,44 @@ def run_ppo_epoch(policy, states, actions, old_lps, returns, values, vmasks,
         optimizer.step()
 
 
+def run_dapg_epoch(policy, states, actions, old_lps, returns, values, vmasks,
+                   optimizer, clip_eps, ent_coef,
+                   demo_states, demo_actions, lambda_bc,
+                   n_epochs=4, critic_states=None):
+    """DAPG (Rajeswaran et al. 2018) adapted for PPO.
+    PPO loss + decaying BC loss on expert demonstrations.
+    Each inner epoch samples a fresh mini-batch from demos.
+    """
+    adv = returns - values.detach()
+    adv = (adv - adv.mean()) / (adv.std() + 1e-8)
+    n_demo = len(demo_states)
+    for _ in range(n_epochs):
+        # Standard PPO loss
+        logits, vals = policy(states, critic_states, vmasks)
+        probs = F.softmax(logits, dim=-1).clamp(min=1e-8)
+        dist = torch.distributions.Categorical(probs)
+        nlp = dist.log_prob(actions)
+        ent = dist.entropy()
+        ratio = torch.exp(nlp - old_lps)
+        s1 = ratio * adv
+        s2 = torch.clamp(ratio, 1 - clip_eps, 1 + clip_eps) * adv
+        ppo_loss = -torch.min(s1, s2).mean() + 0.5 * F.mse_loss(vals, returns) - ent_coef * ent.mean()
+
+        # DAPG BC term: cross-entropy on expert demo mini-batch
+        if lambda_bc > 1e-8 and n_demo > 0:
+            di = np.random.choice(n_demo, min(512, n_demo), replace=False)
+            demo_lo, _ = policy(demo_states[di])
+            bc_loss = F.cross_entropy(demo_lo, demo_actions[di])
+            loss = ppo_loss + lambda_bc * bc_loss
+        else:
+            loss = ppo_loss
+
+        optimizer.zero_grad()
+        loss.backward()
+        nn.utils.clip_grad_norm_(policy.parameters(), 0.5)
+        optimizer.step()
+
+
 def run_ppo_epoch_masked(policy, states, actions, old_lps, returns, values, vmasks,
                          ppo_mask, optimizer, clip_eps, ent_coef, n_epochs=4):
     """PPO update with per-sample mask (for DLELP S-Agent exclusion)."""
@@ -173,12 +211,16 @@ def run_ppo_epoch_masked(policy, states, actions, old_lps, returns, values, vmas
 
 
 def compute_ep_reward(mastery_b, targets_b, es_b, batch_size):
-    """Compute terminal EP reward for a batch. Skip targets where 1-Es <= 0.01."""
+    """Compute terminal EP reward (aggregate form).
+    EP = sum(Ee-Es) / sum(1-Es). Naturally down-weights near-ceiling targets.
+    """
     rewards = np.zeros(batch_size, dtype=np.float32)
     for i in range(batch_size):
         ee = mastery_b[i][targets_b[i]]
         es = es_b[i]
-        vals = [(ee[j] - es[j]) / (1 - es[j])
-                for j in range(len(targets_b[i])) if 1 - es[j] > 0.01]
-        rewards[i] = np.mean(vals) if vals else 0.0
+        denom = (1 - es).sum()
+        if denom < 1e-6:
+            rewards[i] = 0.0
+        else:
+            rewards[i] = (ee - es).sum() / denom
     return rewards

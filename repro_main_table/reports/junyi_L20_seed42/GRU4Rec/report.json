@@ -1,0 +1,8 @@
+{
+  "method": "GRU4Rec",
+  "dataset": "junyi",
+  "L": 20,
+  "seed": 42,
+  "best_test_ep": -0.015769085140200333,
+  "latest_test_ep": -0.015769085140200333
+}

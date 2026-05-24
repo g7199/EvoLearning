@@ -1,0 +1,8 @@
+{
+  "method": "CSEAL",
+  "dataset": "assist09",
+  "L": 20,
+  "seed": 42,
+  "best_test_ep": 0.44142586720208155,
+  "latest_test_ep": 0.44142586720208155
+}

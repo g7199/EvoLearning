@@ -1,0 +1,8 @@
+{
+  "method": "GEHRL",
+  "dataset": "ednet",
+  "L": 20,
+  "seed": 123,
+  "best_test_ep": -0.09550059645866117,
+  "latest_test_ep": -0.09550059645866117
+}

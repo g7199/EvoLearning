@@ -1,0 +1,8 @@
+{
+  "method": "EvoLearning-BC",
+  "dataset": "assist15",
+  "L": 5,
+  "seed": 7,
+  "best_test_ep": 0.47170088230919693,
+  "latest_test_ep": 0.47170088230919693
+}

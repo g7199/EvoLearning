@@ -111,11 +111,11 @@ KES는 결정론적 응답 모델로 작동한다: 학습자가 개념 $c$를 �
 
 \subsection{효과성 백분율 (EP)}
 
-LPR의 표준 평가 지표는 효과성 백분율~\cite{liu2019cseal}로, 학습 경로 실행 후 목표 개념에 대한 정규화된 숙달도 향상을 측정한다:
+LPR의 표준 평가 지표는 효과성 백분율~\cite{liu2019cseal,cheng2025knowlp}로, 학습 경로 실행 후 목표 개념에 대한 정규화된 숙달도 향상을 측정한다:
 \begin{equation}
-    \ep = \frac{1}{|\mathcal{G}'|} \sum_{g \in \mathcal{G}'} \frac{E_g^{\text{end}} - E_g^{\text{start}}}{1 - E_g^{\text{start}}}
+    \ep = \frac{\sum_{g \in \mathcal{G}} \bigl(E_g^{\text{end}} - E_g^{\text{start}}\bigr)}{\sum_{g \in \mathcal{G}} \bigl(1 - E_g^{\text{start}}\bigr)}
 \end{equation}
-여기서 $\mathcal{G}' = \{g \in \mathcal{G} : 1 - E_g^{\text{start}} > 0.01\}$은 거의 숙달된 목표를 제외한다.
+이 집계형(aggregate) 공식~\cite{cheng2025knowlp}은 각 목표를 개선 여지 $(1 - E_g^{\text{start}})$에 비례하여 가중하므로, 이미 높은 숙달도를 가진 목표가 지표를 지배하는 문제를 자연스럽게 방지한다.
 
 %% ============================================================
 \section{방법론: \ours{}}

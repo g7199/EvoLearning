@@ -1,0 +1,8 @@
+{
+  "method": "EvoLearning-DAPG",
+  "dataset": "assist15",
+  "L": 20,
+  "seed": 7,
+  "best_test_ep": 0.622114265529536,
+  "latest_test_ep": 0.622114265529536
+}

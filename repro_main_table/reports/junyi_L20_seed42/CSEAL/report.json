@@ -1,0 +1,8 @@
+{
+  "method": "CSEAL",
+  "dataset": "junyi",
+  "L": 20,
+  "seed": 42,
+  "best_test_ep": 0.1979947502264986,
+  "latest_test_ep": 0.1979947502264986
+}

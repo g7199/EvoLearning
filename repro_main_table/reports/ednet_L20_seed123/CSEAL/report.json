@@ -1,0 +1,8 @@
+{
+  "method": "CSEAL",
+  "dataset": "ednet",
+  "L": 20,
+  "seed": 123,
+  "best_test_ep": 0.2292726217555507,
+  "latest_test_ep": 0.2292726217555507
+}

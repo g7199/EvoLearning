@@ -1,0 +1,34 @@
+# EvoLearning -- dependencies pinned to the reference environment used
+# for the paper (conda env, Python 3.11.15). Mirrors pyproject.toml with
+# exact versions. Install into a fresh environment with:
+#     python -m pip install -r requirements.txt
+#
+# Note: transformers is listed in pyproject.toml but is neither installed
+# in the reference environment nor imported anywhere in simpath/ or
+# scripts/, so it is intentionally omitted here.
+
+# --- Core: training, evaluation, and the main results table ---
+numpy==2.4.3
+pandas==3.0.1
+scipy==1.17.1
+scikit-learn==1.8.0
+torch==2.11.0
+tqdm==4.67.3
+einops==0.8.2
+networkx==3.6.1
+matplotlib==3.10.8
+gdown==5.2.1
+
+# Knowledge-tracing backbone (DKT, AKT, ...). Installed from git, as in
+# pyproject.toml; the reference environment reports version 0.0.38.
+pykt-toolkit @ git+https://github.com/pykt-team/pykt-toolkit.git
+
+# --- Optional: only needed to rebuild the LLM concept graph (KnowLP).
+#     These are imported lazily, so the core pipeline and the main-table
+#     reproduction run without them. ---
+python-dotenv==1.2.2
+openai==2.29.0
+anthropic==0.86.0
+
+# --- Dev / tests ---
+pytest==9.0.2

@@ -24,7 +24,7 @@ import numpy as np
 import torch
 
 
-def setup_assist09(gpu, L=5):
+def setup_assist09(gpu, L=5, topk=5):
     """Full pipeline for ASSIST09 dataset."""
     device = gpu if gpu == 'cpu' else f'cuda:{gpu}'
     print(f"\n{'='*60}")
@@ -71,7 +71,7 @@ def setup_assist09(gpu, L=5):
         print(f"  [4/5] Evo experts exist: {evo_path}")
     else:
         print(f"  [4/5] Generating Evo experts L={L} (this takes ~1 hour)...")
-        _generate_evo_experts('assist09', device, L=L, save_path=evo_path)
+        _generate_evo_experts('assist09', device, L=L, save_path=evo_path, topk=topk)
 
     # Step 6: KnowLP graph (optional, needs API key)
     knowlp_path = 'outputs/knowlp_graph_assist09.pkl'
@@ -95,7 +95,64 @@ def setup_assist09(gpu, L=5):
     return True
 
 
-def setup_junyi(gpu, L=5):
+def setup_assist15(gpu, L=5, topk=5):
+    """Full pipeline for ASSIST15 dataset."""
+    device = gpu if gpu == 'cpu' else f'cuda:{gpu}'
+    print(f"\n{'='*60}")
+    print(f"  ASSIST15 Setup Pipeline (GPU:{gpu})")
+    print(f"{'='*60}")
+
+    proc_path = 'data/processed/assistments/assistments_processed.pkl'
+    if os.path.exists(proc_path):
+        print(f"  [1/5] Preprocessed data exists: {proc_path}")
+    else:
+        print(f"  [1/5] Preprocessing ASSIST15...")
+        from simpath.data.preprocess import preprocess_assistments
+        preprocess_assistments('data/raw/assistments/2015_100_skill_builders_main_problems.csv')
+
+    dkt_path = 'outputs/checkpoints/pykt_dkt_best_assist15.pt'
+    if os.path.exists(dkt_path):
+        print(f"  [2/5] DKT model exists: {dkt_path}")
+    else:
+        print(f"  [2/5] Training DKT on ASSIST15...")
+        os.system(f'{sys.executable} scripts/train_dkt_assist15.py --device {device}')
+
+    graph_path = 'outputs/concept_graph_dkt_assist15.pkl'
+    if os.path.exists(graph_path):
+        print(f"  [3/5] DKT graph exists: {graph_path}")
+    else:
+        print(f"  [3/5] Building DKT influence graph...")
+        _build_dkt_graph('assist15', device)
+
+    evo_path = f'outputs/evo_dpk5_assist15_L{L}.pkl'
+    if os.path.exists(evo_path):
+        print(f"  [4/5] Evo experts exist: {evo_path}")
+    else:
+        print(f"  [4/5] Generating Evo experts L={L}...")
+        _generate_evo_experts('assist15', device, L=L, save_path=evo_path, topk=topk)
+
+    knowlp_path = 'outputs/knowlp_graph_assist15.pkl'
+    if os.path.exists(knowlp_path):
+        print(f"  [5/5] KnowLP graph exists: {knowlp_path}")
+    else:
+        try:
+            from dotenv import load_dotenv
+            load_dotenv()
+            if os.environ.get('OPENAI_API_KEY'):
+                print(f"  [5/5] Building KnowLP EDU-GraphRAG graph...")
+                from simpath.eval.knowlp_graph import build_edu_graphrag
+                from simpath.eval.config import get_dataset_config
+                build_edu_graphrag(get_dataset_config('assist15'), provider='openai')
+            else:
+                print(f"  [5/5] SKIP: KnowLP graph (no OPENAI_API_KEY)")
+        except Exception as e:
+            print(f"  [5/5] SKIP: KnowLP graph ({e})")
+
+    print(f"\n  ASSIST15 setup complete!")
+    return True
+
+
+def setup_junyi(gpu, L=5, topk=5):
     """Full pipeline for Junyi dataset."""
     device = gpu if gpu == 'cpu' else f'cuda:{gpu}'
     print(f"\n{'='*60}")
@@ -139,7 +196,7 @@ def setup_junyi(gpu, L=5):
         print(f"  [4/5] Evo experts exist: {evo_path}")
     else:
         print(f"  [4/5] Generating Evo experts L={L} (this takes ~1 hour)...")
-        _generate_evo_experts('junyi', device, L=L, save_path=evo_path)
+        _generate_evo_experts('junyi', device, L=L, save_path=evo_path, topk=topk)
 
     # Step 6: KnowLP graph
     knowlp_path = 'outputs/knowlp_graph_junyi.pkl'
@@ -149,6 +206,46 @@ def setup_junyi(gpu, L=5):
         print(f"  [5/5] SKIP: KnowLP graph for Junyi (not yet supported)")
 
     print(f"\n  Junyi setup complete!")
+    return True
+
+
+def setup_ednet(gpu, L=5, topk=5):
+    """Full pipeline for EdNet dataset."""
+    device = gpu if gpu == 'cpu' else f'cuda:{gpu}'
+    print(f"\n{'='*60}")
+    print(f"  EdNet Setup Pipeline (GPU:{gpu})")
+    print(f"{'='*60}")
+
+    proc_path = 'data/processed/ednet/ednet_processed.pkl'
+    if os.path.exists(proc_path):
+        print(f"  [1/5] Preprocessed data exists: {proc_path}")
+    else:
+        print(f"  [1/5] Preprocessing EdNet (50K students)...")
+        os.system(f'{sys.executable} scripts/preprocess_ednet.py --max_students 50000')
+
+    dkt_path = 'outputs/checkpoints/pykt_dkt_best_ednet.pt'
+    if os.path.exists(dkt_path):
+        print(f"  [2/5] DKT model exists: {dkt_path}")
+    else:
+        print(f"  [2/5] Training DKT on EdNet...")
+        os.system(f'{sys.executable} scripts/train_dkt_ednet.py --device {device}')
+
+    graph_path = 'outputs/concept_graph_dkt_ednet.pkl'
+    if os.path.exists(graph_path):
+        print(f"  [3/5] DKT graph exists: {graph_path}")
+    else:
+        print(f"  [3/5] Building DKT influence graph...")
+        _build_dkt_graph('ednet', device)
+
+    evo_path = f'outputs/evo_dpk5_ednet_L{L}.pkl'
+    if os.path.exists(evo_path):
+        print(f"  [4/5] Evo experts exist: {evo_path}")
+    else:
+        print(f"  [4/5] Generating Evo experts L={L}...")
+        _generate_evo_experts('ednet', device, L=L, save_path=evo_path, topk=topk)
+
+    print(f"  [5/5] SKIP: KnowLP graph for EdNet (not yet supported)")
+    print(f"\n  EdNet setup complete!")
     return True
 
 
@@ -214,8 +311,8 @@ def _build_dkt_graph(dataset, device):
     print(f"    Saved: {ds['graph_dkt_path']}")
 
 
-def _generate_evo_experts(dataset, device, L=5, save_path=None):
-    """Generate DPP-5 diverse Evo expert trajectories."""
+def _generate_evo_experts(dataset, device, L=5, save_path=None, topk=5):
+    """Generate Evo expert trajectories. topk=1 for best-only, >1 for DPP-K diverse."""
     import heapq
     from simpath.eval.config import get_dataset_config
     from simpath.eval.kes import KES, load_dkt
@@ -287,8 +384,8 @@ def _generate_evo_experts(dataset, device, L=5, save_path=None):
                 out_f = dkt(hist_q[:, :total_len], hist_r[:, :total_len])
             ee = out_f[:, total_len-1, tgt_t]
             es_t = torch.tensor(es, dtype=torch.float32, device=device).unsqueeze(0)
-            denom = (1.0 - es_t).clamp(min=0.01)
-            ep = ((ee - es_t) / denom).mean(1).cpu().numpy()
+            denom = (1.0 - es_t).sum(1).clamp(min=1e-6)
+            ep = (ee - es_t).sum(1).div(denom).cpu().numpy()
             return ep
 
         fit = eval_fit(pops)
@@ -297,7 +394,7 @@ def _generate_evo_experts(dataset, device, L=5, save_path=None):
             i1 = np.random.randint(POP, size=POP); i2 = np.random.randint(POP, size=POP)
             new = pops[np.where(fit[i1] > fit[i2], i1, i2)].copy()
             for i in range(0, POP-1, 2):
-                if np.random.random() < 0.8:
+                if np.random.random() < 0.8 and L > 1:
                     cx = np.random.randint(1, L)
                     ch = list(new[i, :cx])
                     for c in new[i+1]:
@@ -313,16 +410,19 @@ def _generate_evo_experts(dataset, device, L=5, save_path=None):
             new[0] = pops[np.argmax(fit)]
             pops = new; fit = eval_fit(pops)
 
-        # DPP-5 selection
+        # Selection: top-1 (best only) or DPP-K (diverse)
         pl = [pops[p].tolist() for p in range(POP)]
-        sel = []; rem = list(range(POP))
-        for _ in range(5):
-            bi, bs = -1, -float('inf')
-            for idx in rem:
-                s = fit[idx] if not sel else fit[idx] - 0.5 * max(
-                    len(set(pl[idx]) & set(pl[s])) / L for s in sel)
-                if s > bs: bs = s; bi = idx
-            if bi >= 0: sel.append(bi); rem.remove(bi)
+        if topk == 1:
+            sel = [int(np.argmax(fit))]
+        else:
+            sel = []; rem = list(range(POP))
+            for _ in range(topk):
+                bi, bs = -1, -float('inf')
+                for idx in rem:
+                    s = fit[idx] if not sel else fit[idx] - 0.5 * max(
+                        len(set(pl[idx]) & set(pl[s])) / L for s in sel)
+                    if s > bs: bs = s; bi = idx
+                if bi >= 0: sel.append(bi); rem.remove(bi)
         return [(m0, targets, pl[i], fit[i], hc, hr) for i in sel]
 
     t0 = time.time(); all_experts = []
@@ -343,35 +443,41 @@ def _generate_evo_experts(dataset, device, L=5, save_path=None):
 
 if __name__ == '__main__':
     p = argparse.ArgumentParser(description="EvoLearning Setup Pipeline")
-    p.add_argument('--dataset', default='all', choices=['assist09', 'junyi', 'all'])
+    p.add_argument('--dataset', default='all', choices=['assist09', 'assist15', 'junyi', 'ednet', 'all'])
     p.add_argument('--gpu', default='0')
     p.add_argument('--L', type=int, default=5, help='Path length for Evo experts (5, 10, 20)')
+    p.add_argument('--topk', type=int, default=1, help='Experts per student: 1=best-only, 5=DPP-5')
     p.add_argument('--force', action='store_true', help='Delete cached files and regenerate everything')
     args = p.parse_args()
 
     if args.force:
         import glob
         ds = args.dataset
+        L = args.L
         patterns = []
         if ds in ('assist09', 'all'):
-            patterns += ['outputs/concept_graph_dkt_assist09.pkl',
-                         'outputs/evo_dpk5_assist09_L*.pkl',
-                         'outputs/knowlp_graph_assist09*.pkl']
+            patterns += [f'outputs/evo_dpk5_assist09_L{L}.pkl']
+        if ds in ('assist15', 'all'):
+            patterns += [f'outputs/evo_dpk5_assist15_L{L}.pkl']
         if ds in ('junyi', 'all'):
-            patterns += ['outputs/concept_graph_dkt_junyi.pkl',
-                         'outputs/evo_dpk5_junyi_L*.pkl',
-                         'outputs/knowlp_graph_junyi*.pkl']
+            patterns += [f'outputs/evo_dpk5_junyi_L{L}.pkl']
+        if ds in ('ednet', 'all'):
+            patterns += [f'outputs/evo_dpk5_ednet_L{L}.pkl']
         for pat in patterns:
             for f in glob.glob(pat):
                 os.remove(f)
                 print(f"  Deleted: {f}")
 
     if args.dataset in ('assist09', 'all'):
-        setup_assist09(args.gpu, L=args.L)
+        setup_assist09(args.gpu, L=args.L, topk=args.topk)
+    if args.dataset in ('assist15', 'all'):
+        setup_assist15(args.gpu, L=args.L, topk=args.topk)
     if args.dataset in ('junyi', 'all'):
-        setup_junyi(args.gpu, L=args.L)
+        setup_junyi(args.gpu, L=args.L, topk=args.topk)
+    if args.dataset in ('ednet', 'all'):
+        setup_ednet(args.gpu, L=args.L, topk=args.topk)
 
     print(f"\n{'='*60}")
     print(f"  Setup complete! Run experiments with:")
-    print(f"  python scripts/run_experiment.py --dataset assist09 --method all --L 5 --seed 42 --gpu 0,1")
+    print(f"  python scripts/run_experiment.py --dataset assist15 --method all --L 5 --seed 42 --gpu 0,1")
     print(f"{'='*60}")

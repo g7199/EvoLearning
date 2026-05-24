@@ -10,6 +10,7 @@ from simpath.eval.methods.base import (
     BaseMethod, PolicyNet, make_state_standard, compute_ep_reward
 )
 from simpath.eval.graph import get_graph_candidates
+from simpath.eval.kes import FastRollout
 
 
 @register_method
@@ -32,45 +33,46 @@ class CSEALMethod(BaseMethod):
         lr = 7e-4; gamma = 0.99; ent_coef = 0.01
         opt = torch.optim.Adam(policy.parameters(), lr=lr)
         bv = -999; t0 = time.time()
+        rollout = FastRollout(kes.dkt, NC, dev, kes.max_hist)
 
         for ep_i in range(n_episodes):
             indices = np.random.randint(0, len(train_data), size=batch_size)
             batch = [train_data[i] for i in indices]
             hc_b = [s[0] for s in batch]; hr_b = [s[1] for s in batch]; tgts_b = [s[2] for s in batch]
-            init_mastery_b = kes.batch_mastery(hc_b, hr_b)
+
+            init_mastery_b = rollout.init_batch(hc_b, hr_b, tgts_b, L)
             es_b = [init_mastery_b[i][tgts_b[i]].copy() for i in range(batch_size)]
-            sc_b = [list(hc_b[i]) for i in range(batch_size)]
-            sim_mastery_b = init_mastery_b.copy()
-            sr_b = [list(hr_b[i]) for i in range(batch_size)]
             used_b = [set() for _ in range(batch_size)]
             cands_b = [set(get_graph_candidates(tgts_b[i], init_mastery_b[i], graph, NC, cap=30))
                        for i in range(batch_size)]
 
             all_lp, all_v, all_ent, all_rew = [], [], [], []
             for step in range(L):
-                sb, scb, vmb = [], [], []
+                s_actor, s_critic = rollout.make_states(step)
+
+                # CSEAL: graph-based valid mask (built on CPU)
+                vm_np = np.zeros((batch_size, NC), dtype=np.float32)
                 for i in range(batch_size):
-                    s = torch.tensor(make_state_standard(init_mastery_b[i], tgts_b[i], step, L, NC),
-                                     dtype=torch.float32, device=dev)
-                    sc = torch.tensor(make_state_standard(sim_mastery_b[i], tgts_b[i], step, L, NC),
-                                      dtype=torch.float32, device=dev)
-                    vm = torch.zeros(NC, device=dev)
-                    for c in cands_b[i]:
-                        if c not in used_b[i]: vm[c] = 1.0
-                    if vm.sum() == 0:
-                        for c in range(NC):
-                            if c not in used_b[i]: vm[c] = 1.0
-                    sb.append(s); scb.append(sc); vmb.append(vm)
-                st_b = torch.stack(sb); sct_b = torch.stack(scb); vm_b = torch.stack(vmb)
-                logits, vals = policy(st_b, sct_b, vm_b)
+                    valid = [c for c in cands_b[i] if c not in used_b[i]]
+                    if valid:
+                        vm_np[i, valid] = 1.0
+                    else:
+                        all_c = [c for c in range(NC) if c not in used_b[i]]
+                        if all_c:
+                            vm_np[i, all_c] = 1.0
+                vm = torch.from_numpy(vm_np).to(dev)
+
+                logits, vals = policy(s_actor, s_critic, vm)
                 probs = F.softmax(logits, dim=-1).clamp(min=1e-8)
                 dist = torch.distributions.Categorical(probs)
                 actions = dist.sample(); lps = dist.log_prob(actions); ent = dist.entropy()
                 anp = actions.cpu().numpy()
+
                 for i in range(batch_size):
-                    a = anp[i]; sc_b[i].append(a)
-                    sr_b[i].append(1 if sim_mastery_b[i][a] > 0.5 else 0); used_b[i].add(a)
-                sim_mastery_b = kes.batch_mastery(sc_b, sr_b)
+                    used_b[i].add(anp[i])
+
+                sim_mastery_b = rollout.step(anp)
+
                 rewards = np.zeros(batch_size, dtype=np.float32)
                 if step == L - 1:
                     rewards = compute_ep_reward(sim_mastery_b, tgts_b, es_b, batch_size)

@@ -5,7 +5,7 @@ from typing import Optional
 
 @dataclass
 class ExperimentConfig:
-    dataset: str = 'assist09'       # 'assist09' | 'junyi'
+    dataset: str = 'assist15'       # 'assist15' | 'junyi' | 'ednet'
     method: str = 'all'             # method name or 'all'
     L: int = 5                      # path length: 5, 10, 20
     seed: int = 42                  # controls data split + model init + training
@@ -28,6 +28,18 @@ DATASET_CONFIGS = {
         'evo_path_template': 'outputs/evo_dpk5_assist09_L{L}.pkl',
         'max_hist': 200,
     },
+    'assist15': {
+        'num_c': 100,
+        'hidden': 512,
+        'dkt_path': 'outputs/checkpoints/pykt_dkt_best_assist15.pt',
+        'dkt_emb': 200,
+        'graph_dkt_path': 'outputs/concept_graph_dkt_assist15.pkl',
+        'graph_llm_path': 'outputs/knowlp_graph_assist15.pkl',
+        'graph_thr': 0.25,
+        'data_path': 'data/processed/assistments/assistments_processed.pkl',
+        'evo_path_template': 'outputs/evo_dpk5_assist15_L{L}.pkl',
+        'max_hist': 200,
+    },
     'junyi': {
         'num_c': 39,
         'hidden': 256,
@@ -38,6 +50,18 @@ DATASET_CONFIGS = {
         'graph_thr': 0.05,
         'data_path': 'data/processed/junyi/junyi_processed.pkl',
         'evo_path_template': 'outputs/evo_dpk5_junyi_L{L}.pkl',
+        'max_hist': 200,
+    },
+    'ednet': {
+        'num_c': 189,
+        'hidden': 512,
+        'dkt_path': 'outputs/checkpoints/pykt_dkt_best_ednet.pt',
+        'dkt_emb': 200,
+        'graph_dkt_path': 'outputs/concept_graph_dkt_ednet.pkl',
+        'graph_llm_path': None,
+        'graph_thr': 0.15,
+        'data_path': 'data/processed/ednet/ednet_processed.pkl',
+        'evo_path_template': 'outputs/evo_dpk5_ednet_L{L}.pkl',
         'max_hist': 200,
     },
 }

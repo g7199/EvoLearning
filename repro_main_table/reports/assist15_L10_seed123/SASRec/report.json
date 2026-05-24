@@ -1,0 +1,8 @@
+{
+  "method": "SASRec",
+  "dataset": "assist15",
+  "L": 10,
+  "seed": 123,
+  "best_test_ep": 0.4813488154649011,
+  "latest_test_ep": 0.4813488154649011
+}

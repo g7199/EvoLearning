@@ -33,25 +33,67 @@ EvoLearning recommends personalized learning paths by combining evolutionary exp
 ### 1. Environment
 
 ```bash
-conda create -n sim python=3.11
-conda activate sim
-pip install -e .
+# Python 3.10+ (reference environment: 3.11)
+python3 -m venv .venv
+
+# Install deps into the venv WITHOUT activating it (activation is a
+# shell-state hack that differs across shells/OSes); call the venv
+# interpreter directly instead:
+.venv/bin/python -m pip install --upgrade pip
+.venv/bin/python -m pip install -r requirements.txt
+
+# Then run scripts with that same interpreter, e.g.:
+#   .venv/bin/python scripts/run_experiment.py --dataset junyi --L 5
+#
+# (If you prefer activation: 'source .venv/bin/activate' once, then
+#  plain 'python ...'. On Windows: .venv\Scripts\python.exe ...)
 ```
 
-### 2. Data
+Dependencies are pinned in `requirements.txt` (mirrors `pyproject.toml`).
+The scripts add the repo root to `sys.path`, so no editable install is
+needed. To reproduce **only** the main results table (Table 1) with no
+GPU, no training and no third-party packages, see
+[`repro_main_table/`](repro_main_table/) -- it is pure-stdlib and runs
+straight out of a clean checkout.
 
-Download raw datasets and place them:
+### 2. Get the data (download it yourself, then place as shown)
+
+Raw datasets are NOT bundled (licensing and size). Download each one from
+its source and place the files at the exact paths below; preprocessing
+reads these locations.
+
 ```
-data/raw/assist09/skill_builder_data_corrected.csv
+# Junyi Academy   (PSLC DataShop dataset 1198)
+#   https://pslcdatashop.web.cmu.edu/DatasetInfo?datasetId=1198
 data/raw/junyi/junyi_extracted/junyi_ProblemLog_original.csv
 data/raw/junyi/junyi_extracted/junyi_Exercise_table.csv
+
+# ASSIST15  (ASSISTments 2015, "100 skill builders")
+#   https://sites.google.com/site/assistmentsdata/
+data/raw/assistments/2015_100_skill_builders_main_problems.csv
+
+# EdNet KT1  (Riiid)
+#   https://github.com/riiid/ednet
+data/raw/ednet/KT1/u1.csv , u2.csv , ...   (per-student interaction files)
+data/raw/ednet/contents/questions.csv
+
+# ASSIST09  (optional, ASSISTments 2009-2010)
+#   https://sites.google.com/site/assistmentsdata/
+data/raw/assist09/skill_builder_data_corrected.csv
+```
+
+For junyi and assist09 a helper can fetch them automatically:
+
+```bash
+.venv/bin/python scripts/download_data.py --dataset junyi
 ```
 
 ### 3. Pipeline (preprocessing → DKT → graph → experts)
 
 ```bash
-python scripts/setup_pipeline.py --dataset assist09 --gpu 0
-python scripts/setup_pipeline.py --dataset junyi --gpu 1
+.venv/bin/python scripts/setup_pipeline.py --dataset junyi    --gpu 0
+.venv/bin/python scripts/setup_pipeline.py --dataset assist15 --gpu 0
+.venv/bin/python scripts/setup_pipeline.py --dataset ednet    --gpu 0
 ```
 
 This generates:
@@ -86,6 +128,19 @@ for seed in 42 123 7; do
   python scripts/run_experiment.py --dataset assist09 --method all --L 5 --seed $seed --gpu 0,1
 done
 ```
+
+### Main results table (Table 1)
+
+After the runs above finish, aggregate the per-run reports into the table:
+
+```bash
+.venv/bin/python scripts/aggregate_main_table.py
+```
+
+This reads outputs/experiments/<dataset>_L<L>_seed<seed>/<method>/report.json
+across the three seeds and writes outputs/main_table.txt, .csv and .tex.
+For an instant, dependency-free reproduction of Table 1 from pre-computed
+numbers (no data, GPU or training), run repro_main_table/ instead.
 
 ### Parameters
 | Arg | Default | Description |

@@ -1,0 +1,8 @@
+{
+  "method": "Target-repeat",
+  "dataset": "assist09",
+  "L": 20,
+  "seed": 42,
+  "best_test_ep": 0.0928637780437792,
+  "latest_test_ep": 0.0928637780437792
+}

@@ -1,0 +1,8 @@
+{
+  "method": "PPO-vanilla",
+  "dataset": "assist15",
+  "L": 10,
+  "seed": 7,
+  "best_test_ep": 0.5497747040730588,
+  "latest_test_ep": 0.5497747040730588
+}

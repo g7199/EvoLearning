@@ -1,0 +1,8 @@
+{
+  "method": "EvoLearning-DAPG",
+  "dataset": "ednet",
+  "L": 5,
+  "seed": 42,
+  "best_test_ep": 0.2793853708104862,
+  "latest_test_ep": 0.2793853708104862
+}

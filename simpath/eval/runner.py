@@ -16,10 +16,13 @@ import simpath.eval.methods.rule_based
 import simpath.eval.methods.gru4rec
 import simpath.eval.methods.ppo_vanilla
 import simpath.eval.methods.evolearning
+import simpath.eval.methods.evolearning_bc
+import simpath.eval.methods.evolearning_awr
 import simpath.eval.methods.cseal
 import simpath.eval.methods.dlelp
 import simpath.eval.methods.knowlp
 import simpath.eval.methods.gehrl
+import simpath.eval.methods.sasrec
 
 
 def run_single_method(config: ExperimentConfig, method_name: str, device: str):

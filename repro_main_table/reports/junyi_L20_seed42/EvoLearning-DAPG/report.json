@@ -1,0 +1,8 @@
+{
+  "method": "EvoLearning-DAPG",
+  "dataset": "junyi",
+  "L": 20,
+  "seed": 42,
+  "best_test_ep": 0.42564109071390704,
+  "latest_test_ep": 0.42564109071390704
+}

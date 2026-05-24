@@ -32,7 +32,7 @@ from simpath.eval.methods import list_methods
 
 def main():
     p = argparse.ArgumentParser(description="EvoLearning Experiment Runner")
-    p.add_argument('--dataset', default='assist09', choices=['assist09', 'junyi'])
+    p.add_argument('--dataset', default='assist09', choices=['assist09', 'assist15', 'junyi', 'ednet'])
     p.add_argument('--method', default='all',
                    help='Method name or "all". Available: ' + ', '.join(list_methods()))
     p.add_argument('--L', type=int, default=5, help='Path length (5, 10, 20)')

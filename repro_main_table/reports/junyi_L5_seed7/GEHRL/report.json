@@ -1,0 +1,8 @@
+{
+  "method": "GEHRL",
+  "dataset": "junyi",
+  "L": 5,
+  "seed": 7,
+  "best_test_ep": 0.10906731470883824,
+  "latest_test_ep": 0.10906731470883824
+}
