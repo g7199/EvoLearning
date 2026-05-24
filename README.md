@@ -4,7 +4,7 @@
 
 ## Overview
 
-EvoLearning recommends personalized learning paths by combining evolutionary expert generation with behavioral cloning and PPO fine-tuning. This repository provides a unified evaluation framework comparing 10 methods across 2 datasets.
+EvoLearning recommends personalized learning paths by combining evolutionary expert generation with behavioral cloning and PPO fine-tuning. This repository provides a unified evaluation framework comparing 11 methods (Table 1) across 3 datasets.
 
 ## Methods (10)
 
@@ -23,10 +23,14 @@ EvoLearning recommends personalized learning paths by combining evolutionary exp
 
 ## Datasets
 
-| Dataset | Students | KCs | Source |
-|---------|----------|-----|--------|
-| ASSIST09 | 2,303 | 123 | [ASSISTments](https://sites.google.com/site/assistmentsdata/) |
-| Junyi | 10,000 | 39 | [Junyi Academy](https://pslcdatashop.web.cmu.edu/) |
+The three datasets from the paper. "Learners" is the number used in the
+learning-path experiments (train + val + test split).
+
+| Dataset | Learners | KCs | Source |
+| --------- | -------- | ----- | ------ |
+| Junyi | 5,000 | 39 | Junyi Academy (PSLC DataShop 1198) |
+| ASSIST15 | 7,284 | 100 | ASSISTments 2015 (100 skill builders) |
+| EdNet | 24,850 | 189 | EdNet KT1 (Riiid) |
 
 ## Setup
 
@@ -76,13 +80,9 @@ data/raw/assistments/2015_100_skill_builders_main_problems.csv
 #   https://github.com/riiid/ednet
 data/raw/ednet/KT1/u1.csv , u2.csv , ...   (per-student interaction files)
 data/raw/ednet/contents/questions.csv
-
-# ASSIST09  (optional, ASSISTments 2009-2010)
-#   https://sites.google.com/site/assistmentsdata/
-data/raw/assist09/skill_builder_data_corrected.csv
 ```
 
-For junyi and assist09 a helper can fetch them automatically:
+For junyi, a helper can fetch it automatically:
 
 ```bash
 .venv/bin/python scripts/download_data.py --dataset junyi
@@ -114,18 +114,18 @@ echo "OPENAI_API_KEY=sk-..." > .env
 
 ### Single method
 ```bash
-python scripts/run_experiment.py --dataset assist09 --method EvoLearning --L 5 --seed 42 --gpu 0
+python scripts/run_experiment.py --dataset junyi --method EvoLearning --L 5 --seed 42 --gpu 0
 ```
 
 ### All methods (parallel on 2 GPUs)
 ```bash
-python scripts/run_experiment.py --dataset assist09 --method all --L 5 --seed 42 --gpu 0,1
+python scripts/run_experiment.py --dataset junyi --method all --L 5 --seed 42 --gpu 0,1
 ```
 
 ### 3-seed experiment
 ```bash
 for seed in 42 123 7; do
-  python scripts/run_experiment.py --dataset assist09 --method all --L 5 --seed $seed --gpu 0,1
+  python scripts/run_experiment.py --dataset junyi --method all --L 5 --seed $seed --gpu 0,1
 done
 ```
 
@@ -145,7 +145,7 @@ numbers (no data, GPU or training), run repro_main_table/ instead.
 ### Parameters
 | Arg | Default | Description |
 |-----|---------|-------------|
-| `--dataset` | assist09 | Dataset: `assist09`, `junyi` |
+| `--dataset` | junyi | Dataset: `junyi`, `assist15`, `ednet` |
 | `--method` | all | Method name or `all` |
 | `--L` | 5 | Path length: 5, 10, 20 |
 | `--seed` | 42 | Training seed (data split is fixed) |
@@ -157,7 +157,7 @@ numbers (no data, GPU or training), run repro_main_table/ instead.
 
 ```
 outputs/experiments/
-  assist09_L5_seed42/
+  assist15_L10_seed42/
     EvoLearning/
       progress.json        # Real-time progress (for tqdm)
       train.log            # Training log
